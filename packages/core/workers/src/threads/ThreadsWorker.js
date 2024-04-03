@@ -34,7 +34,7 @@ export default class ThreadsWorker implements WorkerImpl {
 
   start(): Promise<void> {
     this.worker = new Worker(WORKER_PATH, {
-      execArgv: this.execArgv,
+      execArgv: this.execArgv.filter(arg => arg !== '--prof'),
       env: process.env,
     });
 
