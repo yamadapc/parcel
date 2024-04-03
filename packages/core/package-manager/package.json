@@ -23,7 +23,9 @@
   "scripts": {
     "build-ts": "mkdir -p lib && flow-to-ts src/types.js > lib/types.d.ts",
     "check-ts": "tsc --noEmit index.d.ts",
-    "test": "mocha test"
+    "test": "mocha test",
+    "clean": "rimraf ./lib",
+    "build:babel": "babel --presets=@parcel/babel-preset src --out-dir lib"
   },
   "targets": {
     "types": false,
@@ -54,6 +56,9 @@
     "semver": "^7.5.2"
   },
   "devDependencies": {
+    "@babel/core": "^7.22.11",
+    "@babel/cli": "^7.22.11",
+    "rimraf": "^5.0.5",
     "command-exists": "^1.2.6",
     "cross-spawn": "^6.0.4",
     "nullthrows": "^1.1.1",

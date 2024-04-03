@@ -19,7 +19,14 @@
   "types": "lib/types.d.ts",
   "scripts": {
     "build-ts": "mkdir -p lib && flow-to-ts src/types.js > lib/types.d.ts",
-    "check-ts": "tsc --noEmit lib/types.d.ts"
+    "check-ts": "tsc --noEmit lib/types.d.ts",
+    "clean": "rimraf ./lib",
+    "build:babel": "babel --presets=@parcel/babel-preset src --out-dir lib"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.22.11",
+    "@babel/cli": "^7.22.11",
+    "rimraf": "^5.0.5"
   },
   "engines": {
     "node": ">= 16.0.0"

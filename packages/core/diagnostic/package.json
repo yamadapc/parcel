@@ -20,12 +20,19 @@
   "engines": {
     "node": ">= 12.0.0"
   },
-  "scripts": {
-    "build-ts": "flow-to-ts src/*.js --write && tsc --emitDeclarationOnly --declaration --esModuleInterop src/*.ts && mkdir -p lib && mv src/*.d.ts lib/. && rm src/*.ts",
-    "check-ts": "tsc --noEmit lib/diagnostic.d.ts"
-  },
   "dependencies": {
     "@mischnic/json-sourcemap": "^0.1.0",
     "nullthrows": "^1.1.1"
+  },
+  "scripts": {
+    "build-ts": "flow-to-ts src/*.js --write && tsc --emitDeclarationOnly --declaration --esModuleInterop src/*.ts && mkdir -p lib && mv src/*.d.ts lib/. && rm src/*.ts",
+    "check-ts": "tsc --noEmit lib/diagnostic.d.ts",
+    "clean": "rimraf ./lib",
+    "build:babel": "babel --presets=@parcel/babel-preset src --out-dir lib"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.22.11",
+    "@babel/cli": "^7.22.11",
+    "rimraf": "^5.0.5"
   }
 }

@@ -22,7 +22,9 @@
   },
   "scripts": {
     "build-ts": "mkdir -p lib && flow-to-ts src/types.js > lib/types.d.ts",
-    "check-ts": "tsc --noEmit index.d.ts"
+    "check-ts": "tsc --noEmit index.d.ts",
+    "clean": "rimraf ./lib",
+    "build:babel": "babel --presets=@parcel/babel-preset src --out-dir lib"
   },
   "dependencies": {
     "@parcel/fs": "2.12.0",
@@ -34,7 +36,10 @@
     "@parcel/core": "^2.12.0"
   },
   "devDependencies": {
-    "idb": "^5.0.8"
+    "idb": "^5.0.8",
+    "@babel/core": "^7.22.11",
+    "@babel/cli": "^7.22.11",
+    "rimraf": "^5.0.5"
   },
   "browser": {
     "./src/IDBCache.js": "./src/IDBCache.browser.js",

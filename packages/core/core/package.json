@@ -20,8 +20,11 @@
   },
   "scripts": {
     "test": "mocha",
+    "test:unit": "mocha ./test",
     "test-ci": "mocha",
-    "check-ts": "tsc --noEmit index.d.ts"
+    "check-ts": "tsc --noEmit index.d.ts",
+    "clean": "rimraf ./lib",
+    "build:babel": "babel --presets=@parcel/babel-preset src --out-dir lib"
   },
   "dependencies": {
     "@mischnic/json-sourcemap": "^0.1.0",
@@ -52,7 +55,11 @@
   },
   "devDependencies": {
     "graphviz": "^0.0.9",
-    "tempy": "^0.2.1"
+    "tempy": "^0.2.1",
+    "@babel/core": "^7.22.11",
+    "@babel/cli": "^7.22.11",
+    "rimraf": "^5.0.5",
+    "mocha": "^8.3.0"
   },
   "browser": {
     "./src/serializerCore.js": "./src/serializerCore.browser.js"

@@ -21,5 +21,14 @@
   },
   "dependencies": {
     "@parcel/plugin": "2.12.0"
+  },
+  "scripts": {
+    "clean": "rimraf ./lib",
+    "build:babel": "babel --presets=@parcel/babel-preset src --out-dir lib"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.22.11",
+    "@babel/cli": "^7.22.11",
+    "rimraf": "^5.0.5"
   }
 }

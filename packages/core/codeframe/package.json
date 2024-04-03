@@ -30,8 +30,15 @@
     "chalk": "^4.1.0"
   },
   "devDependencies": {
+    "@babel/core": "^7.22.11",
+    "@babel/cli": "^7.22.11",
+    "rimraf": "^5.0.5",
     "emphasize": "^4.2.0",
     "slice-ansi": "^4.0.0",
     "string-width": "^4.2.0"
+  },
+  "scripts": {
+    "clean": "rimraf ./lib",
+    "build:babel": "babel --presets=@parcel/babel-preset src --out-dir lib"
   }
 }
