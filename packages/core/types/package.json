@@ -12,7 +12,7 @@
     "access": "public"
   },
   "scripts": {
-    "build-ts": "mkdir -p lib && flow-to-ts index.js > lib/index.d.ts && flow-to-ts unsafe.js > lib/unsafe.d.ts && node build-ts.js",
+    "build-ts": "./scripts/build-ts.sh",
     "check-ts": "tsc --noEmit lib/index.d.ts"
   },
   "dependencies": {
