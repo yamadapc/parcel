@@ -2,7 +2,13 @@
   "$schema": "https://turbo.build/schema.json",
   "pipeline": {
     "clean": {},
+    "dev:prepare": {},
     "build:babel": {
+      "inputs": ["src/**"],
+      "outputs": ["lib/**"]
+    },
+    "build:parcel": {
+      "dependsOn": ["^build:babel", "^build:parcel"],
       "inputs": ["src/**"],
       "outputs": ["lib/**"]
     },

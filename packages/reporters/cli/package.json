@@ -44,5 +44,8 @@
     "ora": "^5.2.0",
     "string-width": "^4.2.0",
     "wrap-ansi": "^7.0.0"
+  },
+  "scripts": {
+    "build:parcel": "cross-env NODE_ENV=production PARCEL_BUILD_ENV=production PARCEL_SELF_BUILD=true parcel build ."
   }
 }

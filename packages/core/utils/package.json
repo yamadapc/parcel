@@ -72,6 +72,7 @@
   "scripts": {
     "test:unit": "mocha ./src ./test",
     "clean": "rimraf ./lib",
-    "build:babel": "babel --presets=@parcel/babel-preset src --out-dir lib"
+    "build:babel": "babel --presets=@parcel/babel-preset src --out-dir lib",
+    "build:parcel": "cross-env NODE_ENV=production PARCEL_BUILD_ENV=production PARCEL_SELF_BUILD=true parcel build ."
   }
 }
