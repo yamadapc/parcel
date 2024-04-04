@@ -11,7 +11,7 @@
     "packages/*/*"
   ],
   "scripts": {
-    "build": "turbo run build:babel && yarn build-bundles",
+    "build": "turbo run build:babel build:parcel",
     "build-bundles": "turbo run build:parcel",
     "build-ts": "lerna run build-ts && lerna run check-ts",
     "build-native": "node scripts/build-native.js",
