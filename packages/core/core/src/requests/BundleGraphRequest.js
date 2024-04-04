@@ -17,7 +17,7 @@ import type {ConfigAndCachePath} from './ParcelConfigRequest';
 import invariant from 'assert';
 import assert from 'assert';
 import nullthrows from 'nullthrows';
-import {PluginLogger} from '@parcel/logger';
+import logger, {PluginLogger} from '@parcel/logger';
 import ThrowableDiagnostic, {errorToDiagnostic} from '@parcel/diagnostic';
 import AssetGraph from '../AssetGraph';
 import BundleGraph from '../public/BundleGraph';
@@ -90,7 +90,11 @@ export default function createBundleGraphRequest(
   return {
     type: requestTypes.bundle_graph_request,
     id: 'BundleGraph',
-    run: async input => {
+    run: async (input: RunInput) => {
+      logger.verbose({
+        origin: '@parcel/core',
+        message: `Run BundleGraphRequest ${input.input.requestedAssetIds}`,
+      });
       let {options, api, invalidateReason} = input;
       let {optionsRef, requestedAssetIds, signal} = input.input;
       let measurement = tracer.createMeasurement('building');

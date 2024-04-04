@@ -21,6 +21,7 @@ import {runConfigRequest} from './ConfigRequest';
 import {fromProjectPath, fromProjectPathRelative} from '../projectPath';
 import {report} from '../ReporterRunner';
 import {requestTypes} from '../RequestTracker';
+import logger from '@parcel/logger';
 
 type RunInput<TResult> = {|
   input: AssetRequestInput,
@@ -65,6 +66,10 @@ function getId(input: AssetRequestInput) {
 }
 
 async function run({input, api, farm, invalidateReason, options}) {
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `Run AssetRequest ${JSON.stringify(input)}`,
+  });
   report({
     type: 'buildProgress',
     phase: 'transforming',
@@ -119,6 +124,10 @@ async function run({input, api, farm, invalidateReason, options}) {
     ),
   };
 
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `Running transform ${JSON.stringify(input)}`,
+  });
   let {assets, configRequests, error, invalidations, devDepRequests} =
     (await farm.createHandle(
       'runTransform',

@@ -25,6 +25,7 @@ import {
   fromProjectPathRelative,
   toProjectPath,
 } from '../projectPath';
+import logger from '@parcel/logger';
 
 type RunOpts<TResult> = {|
   input: ProjectPath,
@@ -56,6 +57,10 @@ export default function createEntryRequest(input: ProjectPath): EntryRequest {
 }
 
 async function run({input, api, options}): Promise<EntryResult> {
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `Run EntryRequest ${input.id}`,
+  });
   let entryResolver = new EntryResolver(options);
   let filePath = fromProjectPath(options.projectRoot, input);
   let result = await entryResolver.resolveEntry(filePath);

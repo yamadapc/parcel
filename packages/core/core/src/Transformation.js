@@ -133,6 +133,10 @@ export default class Transformation {
   }
 
   async run(): Promise<TransformationResult> {
+    logger.verbose({
+      origin: '@parcel/workers',
+      message: 'Load asset',
+    });
     let asset = await this.loadAsset();
     let existing;
 
@@ -156,6 +160,10 @@ export default class Transformation {
       }
     }
 
+    logger.verbose({
+      origin: '@parcel/workers',
+      message: 'Load asset source',
+    });
     if (
       existing == null &&
       // Don't buffer an entire stream into memory since it may not need sourceContent,
@@ -174,12 +182,20 @@ export default class Transformation {
       this.parcelConfig,
     );
 
+    logger.verbose({
+      origin: '@parcel/workers',
+      message: 'Load asset pipeline',
+    });
     let pipeline = await this.loadPipeline(
       this.request.filePath,
       asset.value.isSource,
       asset.value.pipeline,
     );
     let assets, error;
+    logger.verbose({
+      origin: '@parcel/workers',
+      message: 'Run asset pipeline',
+    });
     try {
       let results = await this.runPipelines(pipeline, asset);
       await Promise.all(results.map(asset => asset.commit()));
@@ -188,6 +204,10 @@ export default class Transformation {
       error = e;
     }
 
+    logger.verbose({
+      origin: '@parcel/workers',
+      message: 'Finished asset',
+    });
     let configRequests = getConfigRequests([
       ...this.configs.values(),
       ...this.resolverRunner.configs.values(),

@@ -1,4 +1,5 @@
 // @flow
+import logger from '@parcel/logger';
 import {createBuildCache} from './buildCache';
 import {serializeRaw, deserializeRaw} from './serializerCore';
 
@@ -226,6 +227,10 @@ export function restoreDeserializedObject(object: any): any {
 const serializeCache = createBuildCache();
 
 export function serialize(object: any): Buffer {
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `serialize ${object.constructor.name}`,
+  });
   let cached = serializeCache.get(object);
   if (cached) {
     return cached;

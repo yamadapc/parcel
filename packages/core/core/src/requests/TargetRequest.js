@@ -121,6 +121,10 @@ export function skipTarget(
 }
 
 async function run({input, api, options}) {
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `Run TargetRequest ${input.id}`,
+  });
   let targetResolver = new TargetResolver(
     api,
     optionsProxy(options, api.invalidateOnOptionChange),

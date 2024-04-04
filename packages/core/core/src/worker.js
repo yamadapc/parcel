@@ -31,6 +31,7 @@ import {setFeatureFlags} from '@parcel/feature-flags';
 import '@parcel/cache'; // register with serializer
 import '@parcel/package-manager';
 import '@parcel/fs';
+import logger from '@parcel/logger';
 
 // $FlowFixMe
 if (process.env.PARCEL_BUILD_REPL && process.browser) {
@@ -60,6 +61,10 @@ type WorkerValidationOpts = {|
 let parcelConfigCache = new Map();
 
 function loadOptions(ref, workerApi) {
+  logger.verbose({
+    origin: '@parcel/workers',
+    message: 'Load options',
+  });
   return nullthrows(
     ((workerApi.getSharedReference(
       ref,
@@ -69,6 +74,10 @@ function loadOptions(ref, workerApi) {
 }
 
 async function loadConfig(cachePath, options) {
+  logger.verbose({
+    origin: '@parcel/workers',
+    message: 'Load config',
+  });
   let config = parcelConfigCache.get(cachePath);
   if (config && config.options === options) {
     return config;
@@ -94,6 +103,10 @@ export async function runTransform(
   workerApi: WorkerApi,
   opts: WorkerTransformationOpts,
 ): Promise<TransformationResult> {
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `Running transform on worker ${JSON.stringify(opts)}`,
+  });
   let {optionsRef, configCachePath, ...rest} = opts;
   let options = loadOptions(optionsRef, workerApi);
   let config = await loadConfig(configCachePath, options);

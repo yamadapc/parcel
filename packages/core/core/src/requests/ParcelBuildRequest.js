@@ -4,8 +4,13 @@ import type {ContentKey} from '@parcel/graph';
 import type {Async} from '@parcel/types';
 import type {SharedReference} from '@parcel/workers';
 
-import type {StaticRunOpts} from '../RequestTracker';
-import type {Asset, AssetGroup, PackagedBundleInfo} from '../types';
+import type {RunAPI, StaticRunOpts} from '../RequestTracker';
+import type {
+  Asset,
+  AssetGroup,
+  PackagedBundleInfo,
+  ParcelOptions,
+} from '../types';
 import type BundleGraph from '../BundleGraph';
 
 import createBundleGraphRequest, {
@@ -22,6 +27,7 @@ import {assetFromValue} from '../public/Asset';
 
 import {tracer} from '@parcel/profiler';
 import {requestTypes} from '../RequestTracker';
+import logger from '@parcel/logger';
 
 type ParcelBuildRequestInput = {|
   optionsRef: SharedReference,
@@ -59,7 +65,19 @@ export default function createParcelBuildRequest(
   };
 }
 
-async function run({input, api, options}) {
+async function run({
+  input,
+  api,
+  options,
+}: {
+  input: ParcelBuildRequestInput,
+  api: RunAPI,
+  options: ParcelOptions,
+}) {
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `Run build request ${input.requestedAssetIds}`,
+  });
   let {optionsRef, requestedAssetIds, signal} = input;
 
   let bundleGraphRequest = createBundleGraphRequest({

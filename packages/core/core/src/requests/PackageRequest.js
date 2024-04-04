@@ -2,9 +2,10 @@
 
 import type {ContentKey} from '@parcel/graph';
 import type {Async} from '@parcel/types';
-import type {SharedReference} from '@parcel/workers';
+import type {SharedReference, WorkerFarm} from '@parcel/workers';
+import logger from '@parcel/logger';
 
-import type {StaticRunOpts} from '../RequestTracker';
+import type {RunAPI, StaticRunOpts} from '../RequestTracker';
 import {requestTypes} from '../RequestTracker';
 import type {Bundle} from '../types';
 import type BundleGraph from '../BundleGraph';
@@ -47,7 +48,19 @@ export function createPackageRequest(
   };
 }
 
-async function run({input, api, farm}) {
+async function run({
+  input,
+  api,
+  farm,
+}: {
+  input: PackageRequestInput,
+  farm: WorkerFarm,
+  api: RunAPI,
+}) {
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `Run package request ${input.bundle.publicId}`,
+  });
   let {bundleGraphReference, optionsRef, bundle, useMainThread} = input;
   let runPackage = farm.createHandle('runPackage', useMainThread);
 

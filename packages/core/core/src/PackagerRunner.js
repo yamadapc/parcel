@@ -25,7 +25,7 @@ import type {DevDepSpecifier} from './requests/DevDepRequest';
 
 import invariant from 'assert';
 import {blobToStream, TapStream} from '@parcel/utils';
-import {PluginLogger} from '@parcel/logger';
+import logger, {PluginLogger} from '@parcel/logger';
 import ThrowableDiagnostic, {errorToDiagnostic} from '@parcel/diagnostic';
 import {Readable} from 'stream';
 import nullthrows from 'nullthrows';
@@ -387,6 +387,10 @@ export default class PackagerRunner {
     configs: Map<string, Config>,
     bundleConfigs: Map<string, Config>,
   ): Promise<BundleResult> {
+    logger.verbose({
+      origin: '@parcel/core',
+      message: `Packaging bundle ${internalBundle.name}`,
+    });
     let bundle = NamedBundle.get(internalBundle, bundleGraph, this.options);
     this.report({
       type: 'buildProgress',
@@ -472,6 +476,10 @@ export default class PackagerRunner {
     configs: Map<string, Config>,
     bundleConfigs: Map<string, Config>,
   ): Promise<BundleResult> {
+    logger.verbose({
+      origin: '@parcel/core',
+      message: `Optimizing bundle ${internalBundle.name}`,
+    });
     let bundle = NamedBundle.get(
       internalBundle,
       internalBundleGraph,
