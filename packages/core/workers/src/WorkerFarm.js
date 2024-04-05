@@ -455,6 +455,10 @@ export default class WorkerFarm extends EventEmitter {
     // Starts workers until the maximum is reached
     if (this.workers.size < this.options.maxConcurrentWorkers) {
       let toStart = this.options.maxConcurrentWorkers - this.workers.size;
+      logger.verbose({
+        origin: '@parcel/workers',
+        message: `Starting ${toStart} workers of type ${this.options.backend}`,
+      });
       while (toStart--) {
         this.startChild();
       }

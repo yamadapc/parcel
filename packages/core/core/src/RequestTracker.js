@@ -163,6 +163,13 @@ export const requestTypes = {
   validation_request: 14,
 };
 
+const requestTypeToLabel: {
+  [key: $Keys<typeof requestTypes>]: $Values<typeof requestTypes>,
+} = {};
+Object.entries(requestTypes).forEach(([key, value]) => {
+  requestTypeToLabel[value] = key;
+});
+
 type RequestType = $Values<typeof requestTypes>;
 
 type RequestGraphNode =
@@ -1164,6 +1171,13 @@ export default class RequestTracker {
     request: Request<TInput, TResult>,
     opts?: ?RunRequestOpts,
   ): Promise<TResult> {
+    const start = performance.now();
+    const logId = `${requestTypeToLabel[request.type]}/${request.id}`;
+    logger.verbose({
+      origin: '@parcel/core',
+      message: `RequestGraph::runRequest(${logId}) nodes=${this.graph.nodes.length}`,
+    });
+
     let requestId = this.graph.hasContentKey(request.id)
       ? this.graph.getNodeIdByContentKey(request.id)
       : undefined;
@@ -1217,6 +1231,15 @@ export default class RequestTracker {
       this.completeRequest(requestNodeId);
 
       deferred.resolve(true);
+
+      const end = performance.now();
+      logger.verbose({
+        origin: '@parcel/core',
+        message: `FINISHED RequestGraph::runRequest(${logId}) - ${Math.floor(
+          end - start,
+        )}ms`,
+      });
+
       return result;
     } catch (err) {
       this.rejectRequest(requestNodeId);

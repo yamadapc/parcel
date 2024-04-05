@@ -21,7 +21,7 @@ import ThrowableDiagnostic, {
   errorToDiagnostic,
   md,
 } from '@parcel/diagnostic';
-import {PluginLogger} from '@parcel/logger';
+import logger, {PluginLogger} from '@parcel/logger';
 import nullthrows from 'nullthrows';
 import path from 'path';
 import {normalizePath} from '@parcel/utils';
@@ -101,7 +101,15 @@ async function run({input, api, options}) {
     config,
     previousDevDeps: devDeps,
   });
+  const start = performance.now();
   let result: ResolverResult = await resolverRunner.resolve(input.dependency);
+  const end = performance.now();
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `FINISHED Resolved ${input.dependency.id} in ${Math.floor(
+      end - start,
+    )}ms`,
+  });
 
   if (result.invalidateOnEnvChange) {
     for (let env of result.invalidateOnEnvChange) {
