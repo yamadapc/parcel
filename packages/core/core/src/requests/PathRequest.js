@@ -53,6 +53,12 @@ import {
 import {tracer, PluginTracer} from '@parcel/profiler';
 import {requestTypes} from '../RequestTracker';
 
+/**
+ * Resolve a dependency and return their `AssetRequestInput`s, which will need
+ * to be parsed through `AssetRequest`s.
+ *
+ * ??? IS THIS IT???
+ */
 export type PathRequest = {|
   id: string,
   +type: typeof requestTypes.path_request,

@@ -107,6 +107,10 @@ export function nodeFromEntryFile(entry: Entry): EntryFileNode {
   };
 }
 
+/**
+ * A Graph representing Assets and their Dependencies as they appear in a user’s
+ * project
+ */
 export default class AssetGraph extends ContentGraph<AssetGraphNode> {
   onNodeRemoved: ?(nodeId: NodeId) => mixed;
   hash: ?string;

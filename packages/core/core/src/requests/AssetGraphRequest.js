@@ -61,6 +61,9 @@ type RunInput = {|
   ...StaticRunOpts<AssetGraphRequestResult>,
 |};
 
+/**
+ * Build the `AssetGraph`: the dependency graph of a project's files
+ */
 type AssetGraphRequest = {|
   id: string,
   +type: typeof requestTypes.asset_graph_request,

@@ -27,6 +27,14 @@ type RunInput<TResult> = {|
   ...StaticRunOpts<TResult>,
 |};
 
+/**
+ * Read an asset from disk, figure out its dependencies and metadata. Also run
+ * its transformations
+ *
+ * ??? QUESTION IS THIS IT ???
+ *
+ * Return `Asset`
+ */
 export type AssetRequest = {|
   id: ContentKey,
   +type: typeof requestTypes.asset_request,

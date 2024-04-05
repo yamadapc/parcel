@@ -59,6 +59,9 @@ export type PluginWithBundleConfig = {
   ...
 };
 
+/**
+ * Invalidate cache on changes.
+ */
 export type ConfigRequest = {
   id: string,
   invalidateOnFileChange: Set<ProjectPath>,

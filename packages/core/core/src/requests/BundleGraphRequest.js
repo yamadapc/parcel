@@ -77,6 +77,9 @@ export type BundleGraphResult = {|
   assetRequests: Array<AssetGroup>,
 |};
 
+/**
+ * Build the `BundleGraph` for a given set of assets.
+ */
 type BundleGraphRequest = {|
   id: string,
   +type: typeof requestTypes.bundle_graph_request,
