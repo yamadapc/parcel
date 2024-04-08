@@ -1296,6 +1296,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "once_cell",
  "oxipng",
  "parcel-dev-dep-resolver",
  "parcel-js-swc-core",

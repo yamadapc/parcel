@@ -45,12 +45,6 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
 
   constructor(opts: ?GraphOpts<TNode, TEdgeType>) {
     // this.nodes = opts?.nodes || [];
-    // console.log({ nodes: opts?.nodes, list: opts?.adjacencyList })
-    // try {
-    // throw new Error('debug')
-    // } catch (err) {
-    //   console.log(err.stack);
-    // }
     this.nodesById = opts?.nodesById ?? {};
     this.inner = opts?.graph
       ? ParcelGraphImpl.deserialize(opts?.graph)
@@ -61,10 +55,6 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     }
 
     this.setRootNodeId(opts?.rootNodeId);
-    // let adjacencyList = opts?.adjacencyList;
-    // this.adjacencyList = adjacencyList
-    //   ? AdjacencyList.deserialize(adjacencyList)
-    //   : new AdjacencyList<TEdgeType>();
   }
 
   get nodes(): {|
@@ -205,13 +195,14 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     to: NodeId,
     type: TEdgeType | NullEdgeType = 1,
     // TODO: handle this?
-    _removeOrphans: boolean = true,
+    removeOrphans: boolean = true,
   ) {
     this.inner.removeEdge(
       from,
       to,
 
       Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
+      removeOrphans,
     );
   }
 
@@ -249,7 +240,7 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     }
 
     for (let child of childrenToRemove) {
-      this.inner.removeEdge(fromNodeId, child, type);
+      this.removeEdge(fromNodeId, child, type);
     }
   }
 
@@ -1030,6 +1021,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
 }
 
 export default ParcelGraph;
+// export default JSGraph;
 
 export function mapVisitor<NodeId, TValue, TContext>(
   filter: (NodeId, TraversalActions) => ?TValue,

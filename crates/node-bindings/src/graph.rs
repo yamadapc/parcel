@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use napi::bindgen_prelude::{Buffer, FromNapiValue};
 use napi::{Env, JsFunction, JsUnknown};
 use napi_derive::napi;
+use once_cell::unsync::Lazy;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::{EdgeRef, NodeRef};
 use petgraph::{Directed, Direction, Graph};
@@ -217,7 +218,13 @@ impl ParcelGraphImpl {
   }
 
   #[napi]
-  pub fn remove_edge(&mut self, from: JSNodeIndex, to: JSNodeIndex, maybe_weight: Vec<EdgeWeight>) {
+  pub fn remove_edge(
+    &mut self,
+    from: JSNodeIndex,
+    to: JSNodeIndex,
+    maybe_weight: Vec<EdgeWeight>,
+    remove_orphans: bool,
+  ) {
     let edges = self
       .inner
       .edges_connecting(NodeIndex::new(from as usize), NodeIndex::new(to as usize));

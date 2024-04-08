@@ -1318,7 +1318,7 @@ export default class RequestTracker {
     let requestGraphKey = `requestGraph-${cacheKey}`;
     let snapshotKey = `snapshot-${cacheKey}`;
 
-    if (this.options.shouldDisableCache) {
+    if (this.options.shouldDisableCache || true) {
       return;
     }
 
