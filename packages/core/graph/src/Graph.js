@@ -51,10 +51,16 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     // } catch (err) {
     //   console.log(err.stack);
     // }
-    this.nodesById = {};
-    this.setRootNodeId(opts?.rootNodeId);
-    this.inner = new ParcelGraphImpl();
+    this.nodesById = opts?.nodesById ?? {};
+    this.inner = opts?.graph
+      ? ParcelGraphImpl.deserialize(opts?.graph)
+      : new ParcelGraphImpl();
 
+    if (opts?.graph) {
+      console.log(opts.graph);
+    }
+
+    this.setRootNodeId(opts?.rootNodeId);
     // let adjacencyList = opts?.adjacencyList;
     // this.adjacencyList = adjacencyList
     //   ? AdjacencyList.deserialize(adjacencyList)
@@ -77,14 +83,14 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
 
   setRootNodeId(id: ?NodeId) {
     this.rootNodeId = id;
-    // this.addNode(id);
   }
 
   static deserialize(
     opts: GraphOpts<TNode, TEdgeType>,
   ): ParcelGraph<TNode, TEdgeType> {
     return new this({
-      // nodes: opts.nodes,
+      nodesById: opts.nodesById,
+      graph: opts.graph,
       // adjacencyList: opts.adjacencyList,
       rootNodeId: opts.rootNodeId,
     });
@@ -94,7 +100,8 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
   serialize(): SerializedParcelGraph<TNode, TEdgeType> {
     return {
       // nodes: this.nodes,
-      nodes: [],
+      graph: this.inner.serialize(),
+      nodesById: this.nodesById,
       rootNodeId: this.rootNodeId,
     };
   }
@@ -105,7 +112,11 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
   getAllEdges(): Iterator<Edge<TEdgeType | NullEdgeType>> {
     // TODO
     // return this.adjacencyList.getAllEdges();
-    return [];
+    return this.inner.getAllEdges().map(descr => ({
+      from: descr.from,
+      to: descr.to,
+      type: descr.weight,
+    }));
   }
 
   addNode(node: TNode): NodeId {
@@ -141,7 +152,11 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     type?: TEdgeType | NullEdgeType,
     //  | Array<TEdgeType | NullEdgeType> = 1,
   ): boolean {
-    return this.inner.hasEdge(from, to, type);
+    return this.inner.hasEdge(
+      from,
+      to,
+      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
+    );
   }
 
   getNodeIdsConnectedTo(
@@ -152,7 +167,10 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
       // | Array<TEdgeType | NullEdgeType>
       | AllEdgeTypes = 1,
   ): Array<NodeId> {
-    return this.inner.getNodeIdsConnectedTo(nodeId, type === -1 ? null : type);
+    return this.inner.getNodeIdsConnectedTo(
+      nodeId,
+      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
+    );
   }
 
   getNodeIdsConnectedFrom(
@@ -165,7 +183,7 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
   ): Array<NodeId> {
     return this.inner.getNodeIdsConnectedFrom(
       nodeId,
-      type === -1 ? null : type,
+      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
     );
   }
 
@@ -176,7 +194,10 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
   }
 
   removeEdges(nodeId: NodeId, type: TEdgeType | NullEdgeType = 1) {
-    this.inner.removeEdges(nodeId, type);
+    this.inner.removeEdges(
+      nodeId,
+      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
+    );
   }
 
   removeEdge(
@@ -186,7 +207,12 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     // TODO: handle this?
     _removeOrphans: boolean = true,
   ) {
-    this.inner.removeEdge(from, to, type === -1 ? null : type);
+    this.inner.removeEdge(
+      from,
+      to,
+
+      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
+    );
   }
 
   isOrphanedNode(nodeId: NodeId): boolean {
@@ -236,14 +262,19 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
       // | Array<TEdgeType | NullEdgeType>
       | AllEdgeTypes = 1,
   ): ?TContext {
-    let enter = typeof visit === 'function' ? visit : visit.enter;
+    const enter = typeof visit === 'function' ? visit : visit.enter;
+    const traversalStartNode = nullthrows(
+      startNodeId ?? this.rootNodeId,
+      'A start node is required to traverse',
+    );
+    this._assertHasNodeId(traversalStartNode);
 
-    if (enter && startNodeId != null) {
+    if (enter) {
       this.inner.dfs(
-        startNodeId,
+        traversalStartNode,
         enter,
         typeof visit !== 'function' ? visit.exit ?? null : null,
-        type === -1 ? null : type,
+        Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
         false,
       );
     }
@@ -271,14 +302,19 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
       // | Array<TEdgeType | NullEdgeType>
       | AllEdgeTypes = 1,
   ): ?TContext {
-    let enter = typeof visit === 'function' ? visit : visit.enter;
+    const traversalStartNode = nullthrows(
+      startNodeId ?? this.rootNodeId,
+      'A start node is required to traverse',
+    );
+    this._assertHasNodeId(traversalStartNode);
+    const enter = typeof visit === 'function' ? visit : visit.enter;
 
-    if (enter && startNodeId != null) {
+    if (enter) {
       return this.inner.dfs(
-        startNodeId,
+        traversalStartNode,
         enter,
         typeof visit !== 'function' ? visit.exit ?? null : null,
-        type === -1 ? null : type,
+        Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
         true,
       );
     }
@@ -308,7 +344,7 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
         startNodeId,
         enter,
         typeof visit !== 'function' ? visit.exit ?? null : null,
-        null,
+        [],
         false,
       );
     }
