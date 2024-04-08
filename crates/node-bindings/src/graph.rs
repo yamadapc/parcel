@@ -8,7 +8,8 @@ use napi_derive::napi;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use petgraph::visit::{EdgeRef, NodeRef};
 use petgraph::{Directed, Direction, Graph};
-use rkyv::{Archive, Deserialize, Serialize};
+use postcard::{from_bytes, to_allocvec};
+use serde::{Deserialize, Serialize};
 
 type JSNodeIndex = u32;
 type JSEdgeIndex = u32;
@@ -83,8 +84,7 @@ pub struct ParcelGraphImpl {
   inner: Graph<NodeWeight, EdgeWeight, Directed, u32>,
 }
 
-#[derive(Serialize, Deserialize, Archive, Debug, PartialEq)]
-#[archive(check_bytes)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct SerializedGraph {
   nodes: Vec<u32>,
   edges: Vec<(u32, u32, EdgeWeight)>,
@@ -103,7 +103,8 @@ impl ParcelGraphImpl {
   pub fn deserialize(serialized: Buffer) -> napi::Result<Self> {
     let mut output = Self::new();
     let value = serialized.as_ref();
-    let archive = rkyv::check_archived_root::<SerializedGraph>(&value).unwrap();
+    let archive: SerializedGraph =
+      from_bytes(value).map_err(|_| napi::Error::from_reason("Failed to deserialize"))?;
     for node in archive.nodes.iter() {
       output.add_node(*node);
     }
@@ -135,8 +136,8 @@ impl ParcelGraphImpl {
         })
         .collect(),
     };
-    let serialized = rkyv::to_bytes::<SerializedGraph, 1024>(&serialized)
-      .map_err(|_err| napi::Error::from_reason("Failed to serialize"))?;
+    let serialized =
+      to_allocvec(&serialized).map_err(|_err| napi::Error::from_reason("Failed to serialize"))?;
     Ok(Buffer::from(serialized.as_ref()))
   }
 
