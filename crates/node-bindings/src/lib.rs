@@ -13,6 +13,7 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod fs_search;
+mod graph;
 mod hash;
 #[cfg(not(target_arch = "wasm32"))]
 mod image;

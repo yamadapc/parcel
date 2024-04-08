@@ -164,10 +164,10 @@ export const requestTypes = {
 };
 
 const requestTypeToLabel: {
-  [key: $Keys<typeof requestTypes>]: $Values<typeof requestTypes>,
+  [key: number]: string,
 } = {};
 Object.entries(requestTypes).forEach(([key, value]) => {
-  requestTypeToLabel[value] = key;
+  requestTypeToLabel[Number(value)] = key;
 });
 
 type RequestType = $Values<typeof requestTypes>;
@@ -1444,7 +1444,12 @@ export default class RequestTracker {
       if (!signal?.aborted) throw err;
     }
 
-    report({type: 'cache', phase: 'end', total, size: this.graph.nodes.length});
+    report({
+      type: 'cache',
+      phase: 'end',
+      total,
+      size: Object.keys(this.graph.nodes).length,
+    });
   }
 
   static async init({
@@ -1503,7 +1508,15 @@ export async function readAndDeserializeRequestGraph(
     i += 1;
   }
 
+  const start = performance.now();
   let serializedRequestGraph = await getAndDeserialize(requestGraphKey);
+  const end = performance.now();
+  logger.verbose({
+    origin: '@parcel/core',
+    message: `RequestGraph::readAndDeserializeRequestGraph(${requestGraphKey}) - ${Math.floor(
+      end - start,
+    )}ms`,
+  });
 
   return {
     requestGraph: RequestGraph.deserialize({
@@ -1523,6 +1536,7 @@ async function loadRequestGraph(options): Async<RequestGraph> {
   let cacheKey = getCacheKey(options);
   let requestGraphKey = `requestGraph-${cacheKey}`;
 
+  console.log(options.cache);
   if (await options.cache.hasLargeBlob(requestGraphKey)) {
     let {requestGraph} = await readAndDeserializeRequestGraph(
       options.cache,

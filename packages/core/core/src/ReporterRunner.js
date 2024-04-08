@@ -86,6 +86,17 @@ export default class ReporterRunner {
   };
 
   async report(event: ReporterEvent) {
+    if (event.type === 'log') {
+      console.log(
+        `[${new Date().toISOString()}] [${event.level}] ${
+          event.diagnostics
+            ?.map(
+              diagnostic => `${diagnostic.origin ?? ''} ${diagnostic.message}`,
+            )
+            ?.join(' ; ') ?? ''
+        }`,
+      );
+    }
     // We should catch all errors originating from reporter plugins to prevent infinite loops
     try {
       let reporters = this.reporters;

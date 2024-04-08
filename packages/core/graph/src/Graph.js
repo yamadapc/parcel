@@ -1,5 +1,6 @@
 // @flow strict-local
 
+import {ParcelGraphImpl} from '@parcel/rust';
 import {fromNodeId} from './types';
 import AdjacencyList, {type SerializedAdjacencyList} from './AdjacencyList';
 import type {Edge, NodeId} from './types';
@@ -19,6 +20,11 @@ export type GraphOpts<TNode, TEdgeType: number = 1> = {|
   rootNodeId?: ?NodeId,
 |};
 
+export type SerializedParcelGraph<TNode, TEdgeType: number = 1> = {|
+  nodes: Array<TNode | null>,
+  rootNodeId: ?NodeId,
+|};
+
 export type SerializedGraph<TNode, TEdgeType: number = 1> = {|
   nodes: Array<TNode | null>,
   adjacencyList: SerializedAdjacencyList<TEdgeType>,
@@ -28,7 +34,349 @@ export type SerializedGraph<TNode, TEdgeType: number = 1> = {|
 export type AllEdgeTypes = -1;
 export const ALL_EDGE_TYPES: AllEdgeTypes = -1;
 
-export default class Graph<TNode, TEdgeType: number = 1> {
+/**
+ * Rust backed graph structure
+ */
+export class ParcelGraph<TNode, TEdgeType: number = 1> {
+  nodesById: {[id: number]: TNode};
+  inner: ParcelGraphImpl;
+  rootNodeId: ?NodeId;
+  _visited: ?BitSet;
+
+  constructor(opts: ?GraphOpts<TNode, TEdgeType>) {
+    // this.nodes = opts?.nodes || [];
+    // console.log({ nodes: opts?.nodes, list: opts?.adjacencyList })
+    // try {
+    // throw new Error('debug')
+    // } catch (err) {
+    //   console.log(err.stack);
+    // }
+    this.nodesById = {};
+    this.setRootNodeId(opts?.rootNodeId);
+    this.inner = new ParcelGraphImpl();
+
+    // let adjacencyList = opts?.adjacencyList;
+    // this.adjacencyList = adjacencyList
+    //   ? AdjacencyList.deserialize(adjacencyList)
+    //   : new AdjacencyList<TEdgeType>();
+  }
+
+  get nodes(): {|
+    entries(): [NodeId, TNode][],
+  |} {
+    const nodes = Object.keys(this.nodesById);
+    const values = nodes.map(key => this.nodesById[Number(key)]);
+    values.entries = () => {
+      return nodes.map(key => {
+        const node = this.nodesById[Number(key)];
+        return [Number(key), node];
+      });
+    };
+    return values;
+  }
+
+  setRootNodeId(id: ?NodeId) {
+    this.rootNodeId = id;
+    // this.addNode(id);
+  }
+
+  static deserialize(
+    opts: GraphOpts<TNode, TEdgeType>,
+  ): ParcelGraph<TNode, TEdgeType> {
+    return new this({
+      // nodes: opts.nodes,
+      // adjacencyList: opts.adjacencyList,
+      rootNodeId: opts.rootNodeId,
+    });
+  }
+
+  // TODO serialise the graph itself
+  serialize(): SerializedParcelGraph<TNode, TEdgeType> {
+    return {
+      // nodes: this.nodes,
+      nodes: [],
+      rootNodeId: this.rootNodeId,
+    };
+  }
+
+  // TODO
+  // Returns an iterator of all edges in the graph. This can be large, so iterating
+  // the complete list can be costly in large graphs. Used when merging graphs.
+  getAllEdges(): Iterator<Edge<TEdgeType | NullEdgeType>> {
+    // TODO
+    // return this.adjacencyList.getAllEdges();
+    return [];
+  }
+
+  addNode(node: TNode): NodeId {
+    let id = this.inner.addNode(0);
+    // console.log('addNode', {node, id })
+    this.nodesById[id] = node;
+    return id;
+  }
+
+  hasNode(id: NodeId): boolean {
+    return this.nodesById[id] != null;
+  }
+
+  getNode(id: NodeId): ?TNode {
+    return this.nodesById[id];
+  }
+
+  addEdge(
+    from: NodeId,
+    to: NodeId,
+    type: TEdgeType | NullEdgeType = 1,
+  ): boolean {
+    this._assertHasNodeId(from);
+    this._assertHasNodeId(to);
+    // console.log('addEdge', { from, to, type })
+    this.inner.addEdge(from, to, type);
+    return true;
+  }
+
+  hasEdge(
+    from: NodeId,
+    to: NodeId,
+    type?: TEdgeType | NullEdgeType,
+    //  | Array<TEdgeType | NullEdgeType> = 1,
+  ): boolean {
+    return this.inner.hasEdge(from, to, type);
+  }
+
+  getNodeIdsConnectedTo(
+    nodeId: NodeId,
+    type:
+      | TEdgeType
+      | NullEdgeType
+      // | Array<TEdgeType | NullEdgeType>
+      | AllEdgeTypes = 1,
+  ): Array<NodeId> {
+    return this.inner.getNodeIdsConnectedTo(nodeId, type === -1 ? null : type);
+  }
+
+  getNodeIdsConnectedFrom(
+    nodeId: NodeId,
+    type:
+      | TEdgeType
+      | NullEdgeType
+      // | Array<TEdgeType | NullEdgeType>
+      | AllEdgeTypes = 1,
+  ): Array<NodeId> {
+    return this.inner.getNodeIdsConnectedFrom(
+      nodeId,
+      type === -1 ? null : type,
+    );
+  }
+
+  // Removes node and any edges coming from or to that node
+  removeNode(nodeId: NodeId) {
+    this.inner.removeNode(nodeId);
+    delete this.nodesById[nodeId];
+  }
+
+  removeEdges(nodeId: NodeId, type: TEdgeType | NullEdgeType = 1) {
+    this.inner.removeEdges(nodeId, type);
+  }
+
+  removeEdge(
+    from: NodeId,
+    to: NodeId,
+    type: TEdgeType | NullEdgeType = 1,
+    // TODO: handle this?
+    _removeOrphans: boolean = true,
+  ) {
+    this.inner.removeEdge(from, to, type === -1 ? null : type);
+  }
+
+  isOrphanedNode(nodeId: NodeId): boolean {
+    // TODO: need to search up to root
+    return false;
+  }
+
+  updateNode(nodeId: NodeId, node: TNode): void {
+    this._assertHasNodeId(nodeId);
+    this.nodesById[nodeId] = node;
+  }
+
+  // Update a node's downstream nodes making sure to prune any orphaned branches
+  replaceNodeIdsConnectedTo(
+    fromNodeId: NodeId,
+    toNodeIds: $ReadOnlyArray<NodeId>,
+    replaceFilter?: null | (NodeId => boolean),
+    type?: TEdgeType | NullEdgeType = 1,
+  ): void {
+    this._assertHasNodeId(fromNodeId);
+
+    let outboundEdges = this.getNodeIdsConnectedFrom(fromNodeId, type);
+    let childrenToRemove = new Set(
+      replaceFilter
+        ? outboundEdges.filter(toNodeId => replaceFilter(toNodeId))
+        : outboundEdges,
+    );
+    for (let toNodeId of toNodeIds) {
+      childrenToRemove.delete(toNodeId);
+
+      if (!this.hasEdge(fromNodeId, toNodeId, type)) {
+        this.addEdge(fromNodeId, toNodeId, type);
+      }
+    }
+
+    for (let child of childrenToRemove) {
+      this.inner.removeEdge(fromNodeId, child, type);
+    }
+  }
+
+  traverse<TContext>(
+    visit: GraphVisitor<NodeId, TContext>,
+    startNodeId: ?NodeId,
+    type:
+      | TEdgeType
+      | NullEdgeType
+      // | Array<TEdgeType | NullEdgeType>
+      | AllEdgeTypes = 1,
+  ): ?TContext {
+    let enter = typeof visit === 'function' ? visit : visit.enter;
+
+    if (enter && startNodeId != null) {
+      this.inner.dfs(
+        startNodeId,
+        enter,
+        typeof visit !== 'function' ? visit.exit ?? null : null,
+        type === -1 ? null : type,
+        false,
+      );
+    }
+  }
+
+  filteredTraverse<TValue, TContext>(
+    filter: (NodeId, TraversalActions) => ?TValue,
+    visit: GraphVisitor<TValue, TContext>,
+    startNodeId: ?NodeId,
+    type?:
+      | TEdgeType
+      | NullEdgeType
+      // | Array<TEdgeType>
+      | AllEdgeTypes,
+  ): ?TContext {
+    return this.traverse(mapVisitor(filter, visit), startNodeId, type);
+  }
+
+  traverseAncestors<TContext>(
+    startNodeId: ?NodeId,
+    visit: GraphVisitor<NodeId, TContext>,
+    type:
+      | TEdgeType
+      | NullEdgeType
+      // | Array<TEdgeType | NullEdgeType>
+      | AllEdgeTypes = 1,
+  ): ?TContext {
+    let enter = typeof visit === 'function' ? visit : visit.enter;
+
+    if (enter && startNodeId != null) {
+      return this.inner.dfs(
+        startNodeId,
+        enter,
+        typeof visit !== 'function' ? visit.exit ?? null : null,
+        type === -1 ? null : type,
+        true,
+      );
+    }
+  }
+
+  // A post-order implementation of dfsFast
+  postOrderDfsFast(
+    visit: GraphTraversalCallback<NodeId, TraversalActions>,
+    startNodeId: ?NodeId,
+  ): void {
+    // TODO: implement in rust
+  }
+
+  dfs<TContext>({
+    visit,
+    startNodeId,
+    getChildren,
+  }: {|
+    visit: GraphVisitor<NodeId, TContext>,
+    getChildren(nodeId: NodeId): Array<NodeId>,
+    startNodeId?: ?NodeId,
+  |}): ?TContext {
+    let enter = typeof visit === 'function' ? visit : visit.enter;
+
+    if (enter && startNodeId != null) {
+      return this.inner.dfs(
+        startNodeId,
+        enter,
+        typeof visit !== 'function' ? visit.exit ?? null : null,
+        null,
+        false,
+      );
+    }
+  }
+
+  topoSort(): Array<NodeId> {
+    // type?: TEdgeType
+    return this.inner.topoSort();
+  }
+
+  findAncestor(nodeId: NodeId, fn: (nodeId: NodeId) => boolean): ?NodeId {
+    let res = null;
+    this.traverseAncestors(nodeId, (nodeId, ctx, traversal) => {
+      if (fn(nodeId)) {
+        res = nodeId;
+        traversal.stop();
+      }
+    });
+    return res;
+  }
+
+  findAncestors(
+    nodeId: NodeId,
+    fn: (nodeId: NodeId) => boolean,
+  ): Array<NodeId> {
+    let res = [];
+    this.traverseAncestors(nodeId, (nodeId, ctx, traversal) => {
+      if (fn(nodeId)) {
+        res.push(nodeId);
+        traversal.skipChildren();
+      }
+    });
+    return res;
+  }
+
+  findDescendant(nodeId: NodeId, fn: (nodeId: NodeId) => boolean): ?NodeId {
+    let res = null;
+    this.traverse((nodeId, ctx, traversal) => {
+      if (fn(nodeId)) {
+        res = nodeId;
+        traversal.stop();
+      }
+    }, nodeId);
+    return res;
+  }
+
+  findDescendants(
+    nodeId: NodeId,
+    fn: (nodeId: NodeId) => boolean,
+  ): Array<NodeId> {
+    let res = [];
+    this.traverse((nodeId, ctx, traversal) => {
+      if (fn(nodeId)) {
+        res.push(nodeId);
+        traversal.skipChildren();
+      }
+    }, nodeId);
+    return res;
+  }
+
+  _assertHasNodeId(nodeId: NodeId) {
+    if (!this.hasNode(nodeId)) {
+      throw new Error('Does not have node ' + fromNodeId(nodeId));
+    }
+  }
+}
+
+export class JSGraph<TNode, TEdgeType: number = 1> {
   nodes: Array<TNode | null>;
   adjacencyList: AdjacencyList<TEdgeType>;
   rootNodeId: ?NodeId;
@@ -644,6 +992,8 @@ export default class Graph<TNode, TEdgeType: number = 1> {
     }
   }
 }
+
+export default ParcelGraph;
 
 export function mapVisitor<NodeId, TValue, TContext>(
   filter: (NodeId, TraversalActions) => ?TValue,

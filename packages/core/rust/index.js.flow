@@ -75,3 +75,29 @@ declare export class Resolver {
   resolveAsync(options: ResolveOptions): Promise<ResolveResult>;
   getInvalidations(path: string): JsInvalidations;
 }
+
+type JSNodeIndex = number;
+type JSEdgeIndex = number;
+type NodeWeight = number;
+type EdgeWeight = number;
+
+/**
+ * Internal graph used for Parcel bundle/asset/request tracking, wraps petgraph
+ * Edges and nodes have number weights
+ */
+declare export class ParcelGraphImpl {
+  constructor(): ParcelGraphImpl;
+  addNode(weight: NodeWeight): JSNodeIndex;
+  hasNode(nodeIndex: JSNodeIndex): boolean;
+  nodeWeight(nodeIndex: JSNodeIndex): NodeWeight | null;
+  removeNode(nodeIndex: JSNodeIndex): void;
+  addEdge(from: JSNodeIndex, to: JSNodeIndex, weight: EdgeWeight): JSEdgeIndex;
+  hasEdge(from: JSNodeIndex, to: JSNodeIndex, maybeWeight?: EdgeWeight | void | null): boolean;
+  removeEdge(from: JSNodeIndex, to: JSNodeIndex, maybeWeight?: EdgeWeight | void | null): void;
+  removeEdges(nodeIndex: JSNodeIndex, maybeWeight?: EdgeWeight | void | null): void;
+  getNodeIdsConnectedTo(nodeIndex: JSNodeIndex, edgeWeight?: EdgeWeight | void | null): Array<JSNodeIndex>;
+  getNodeIdsConnectedFrom(nodeIndex: JSNodeIndex, edgeWeight?: EdgeWeight | void | null): Array<JSNodeIndex>;
+  /** Will return an empty vec if the graph has a cycle */
+  topoSort(): Array<JSNodeIndex>;
+  dfs(startNode: JSNodeIndex, enter: (...args: any[]) => any, exit: null | ((...args: any[]) => any | void | null), typ: number | null, traverseUp: boolean): void;
+}

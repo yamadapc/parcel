@@ -289,6 +289,10 @@ class BundlerRunner {
           let changedAssetNode = nullthrows(
             graph.getNodeByContentKey(changedAssetId),
           );
+          logger.verbose({
+            origin: '@parcel/core',
+            message: `Updating asset node ${String(changedAssetNode)}`,
+          });
           invariant(changedAssetNode.type === 'asset');
           internalBundleGraph.updateAsset(changedAssetNode);
         }
@@ -390,6 +394,10 @@ class BundlerRunner {
           this.cacheKey,
         );
       }
+      logger.verbose({
+        origin: '@parcel/core',
+        message: `Error BundlerRunner::runner: ${e.message} ${e.stack}`,
+      });
 
       throw new ThrowableDiagnostic({
         diagnostic: errorToDiagnostic(e, {
@@ -397,6 +405,10 @@ class BundlerRunner {
         }),
       });
     } finally {
+      logger.verbose({
+        origin: '@parcel/core',
+        message: `Invariant internalBundleGraph!=null = ${internalBundleGraph}`,
+      });
       invariant(internalBundleGraph != null); // ensures the graph was created
       await dumpGraphToGraphViz(
         // $FlowFixMe[incompatible-call]
