@@ -1,75 +1,23 @@
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use napi::bindgen_prelude::{Buffer, FromNapiValue};
+use napi::bindgen_prelude::Buffer;
 use napi::{Env, JsFunction, JsUnknown};
 use napi_derive::napi;
-use once_cell::unsync::Lazy;
 use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::visit::{EdgeRef, NodeRef};
+use petgraph::visit::{Dfs, EdgeRef, NodeRef, Reversed};
 use petgraph::{Directed, Direction, Graph};
 use postcard::{from_bytes, to_allocvec};
 use serde::{Deserialize, Serialize};
+
+use dfs_actions::DFSActions;
+
+mod dfs_actions;
 
 type JSNodeIndex = u32;
 type JSEdgeIndex = u32;
 type NodeWeight = u32;
 type EdgeWeight = u32;
-
-/// Helper for visitor API of Graph traversal
-struct DFSActions {
-  /// If JS flips this on a parent we will skip its children
-  skipped: Rc<AtomicBool>,
-  /// If JS flips this on a parent we will return immediately
-  stopped: Rc<AtomicBool>,
-}
-
-impl DFSActions {
-  fn new() -> Self {
-    Self {
-      skipped: Rc::new(AtomicBool::new(false)),
-      stopped: Rc::new(AtomicBool::new(false)),
-    }
-  }
-
-  fn set_skipped(&self, value: bool) {
-    self.skipped.store(value, Ordering::Relaxed);
-  }
-
-  fn is_skipped(&self) -> bool {
-    self.skipped.load(Ordering::Relaxed)
-  }
-
-  fn is_stopped(&self) -> bool {
-    self.stopped.load(Ordering::Relaxed)
-  }
-
-  fn to_js(&self, env: &Env) -> napi::Result<JsUnknown> {
-    let mut js_actions = env.create_object()?;
-    js_actions.set(
-      "skipChildren",
-      env.create_function_from_closure("skipChildren", {
-        let skipped = self.skipped.clone();
-        move |_| {
-          skipped.store(true, Ordering::Relaxed);
-          Ok(())
-        }
-      })?,
-    )?;
-    js_actions.set(
-      "stop",
-      env.create_function_from_closure("stop", {
-        let stopped = self.stopped.clone();
-        move |_| {
-          stopped.store(true, Ordering::Relaxed);
-          Ok(())
-        }
-      })?,
-    )?;
-    Ok(js_actions.into_unknown())
-  }
-}
 
 #[napi(object)]
 pub struct EdgeDescriptor {
@@ -91,8 +39,13 @@ struct SerializedGraph {
   edges: Vec<(u32, u32, EdgeWeight)>,
 }
 
+// MARK: JavaScript API
 #[napi]
 impl ParcelGraphImpl {
+  /// Create a new graph instance. This is currently a `petgraph` adjacency list graph.
+  /// The graph is directed and has u32 weights for both nodes and edges.
+  ///
+  /// JavaScript owns the graph instance.
   #[napi(constructor)]
   pub fn new() -> Self {
     Self {
@@ -100,6 +53,7 @@ impl ParcelGraphImpl {
     }
   }
 
+  /// Deserialize a graph from a buffer.
   #[napi(factory)]
   pub fn deserialize(serialized: Buffer) -> napi::Result<Self> {
     let mut output = Self::new();
@@ -110,11 +64,12 @@ impl ParcelGraphImpl {
       output.add_node(*node);
     }
     for edge in archive.edges.iter() {
-      output.add_edge(edge.0, edge.1, edge.2);
+      output.add_edge(edge.0, edge.1, edge.2)?;
     }
     Ok(output)
   }
 
+  /// Serialize the graph to a buffer.
   #[napi]
   pub fn serialize(&self, _env: Env) -> napi::Result<Buffer> {
     let serialized = SerializedGraph {
@@ -171,18 +126,25 @@ impl ParcelGraphImpl {
   #[napi]
   pub fn add_edge(
     &mut self,
-    from: JSNodeIndex,
-    to: JSNodeIndex,
+    js_from: JSNodeIndex,
+    js_to: JSNodeIndex,
     weight: EdgeWeight,
-  ) -> JSEdgeIndex {
-    self
-      .inner
-      .add_edge(
-        NodeIndex::new(from as usize),
-        NodeIndex::new(to as usize),
-        weight,
-      )
-      .index() as u32
+  ) -> napi::Result<JSEdgeIndex> {
+    let from = NodeIndex::new(js_from as usize);
+    let to = NodeIndex::new(js_to as usize);
+    if self.inner.node_weight(from).is_none() {
+      return Err(napi::Error::from_reason(format!(
+        "\"from\" node '{js_from}' not found"
+      )));
+    }
+    if self.inner.node_weight(to).is_none() {
+      return Err(napi::Error::from_reason(format!(
+        "\"to\" node '{js_to}' not found"
+      )));
+    }
+
+    let edge = self.inner.add_edge(from, to, weight).index() as u32;
+    Ok(edge)
   }
 
   #[napi]
@@ -223,8 +185,14 @@ impl ParcelGraphImpl {
     from: JSNodeIndex,
     to: JSNodeIndex,
     maybe_weight: Vec<EdgeWeight>,
-    remove_orphans: bool,
-  ) {
+    _remove_orphans: bool,
+  ) -> napi::Result<()> {
+    if !self.has_edge(from, to, maybe_weight.clone()) {
+      return Err(napi::Error::from_reason(format!(
+        "Edge from {from} to {to} not found!"
+      )));
+    }
+
     let edges = self
       .inner
       .edges_connecting(NodeIndex::new(from as usize), NodeIndex::new(to as usize));
@@ -241,6 +209,8 @@ impl ParcelGraphImpl {
     for edge_id in edges_to_remove {
       self.inner.remove_edge(edge_id);
     }
+
+    Ok(())
   }
 
   #[napi]
@@ -309,6 +279,7 @@ impl ParcelGraphImpl {
     result.iter().map(|node| node.index() as u32).collect()
   }
 
+  /// Custom DFS visitor for JS callbacks.
   #[napi]
   pub fn dfs(
     &self,
@@ -356,7 +327,7 @@ impl ParcelGraphImpl {
           visited.insert(idx);
           let js_node_idx = env.create_int64(idx.index() as i64)?;
 
-          actions.set_skipped(false);
+          actions.reset();
 
           // Visit
           let new_context =
@@ -403,17 +374,147 @@ impl ParcelGraphImpl {
     Ok(env.get_undefined()?.into_unknown())
   }
 
-  // #[napi]
-  // pub fn ancestors(&self, node_index: JSNodeIndex) -> Vec<JSNodeIndex> {
-  //   self.inner
-  // }
-  // #[napi]
-  // pub fn descendants(&self, node_index: JSNodeIndex) -> Vec<JSNodeIndex> {
-  // }
+  #[napi]
+  pub fn get_unreachable_nodes(&self, root_index: JSNodeIndex) -> Vec<JSNodeIndex> {
+    let root_index = NodeIndex::new(root_index as usize);
+    get_unreachable_nodes(&self.inner, root_index)
+      .into_iter()
+      .map(|node| node.index() as u32)
+      .collect()
+  }
+
+  #[napi]
+  pub fn is_orphaned_node(&self, root_index: JSNodeIndex, node_index: JSNodeIndex) -> bool {
+    let root_index = NodeIndex::new(root_index as usize);
+    let node_index = NodeIndex::new(node_index as usize);
+
+    is_orphaned_node(&self.inner, root_index, node_index)
+  }
+}
+
+/// Given a graph and root index, get the list of nodes that are disconnected from the
+/// root and unreachable.
+///
+/// O(n) with respect to the number of nodes in the graph.
+fn get_unreachable_nodes<N, E>(graph: &Graph<N, E>, root: NodeIndex) -> Vec<NodeIndex> {
+  let mut dfs = Dfs::new(&graph, root);
+  let mut reachable_nodes = HashSet::new();
+
+  while let Some(node) = dfs.next(&graph) {
+    reachable_nodes.insert(node);
+  }
+
+  graph
+    .node_indices()
+    .collect::<Vec<NodeIndex>>()
+    .into_iter()
+    .filter(|node| !reachable_nodes.contains(node))
+    .collect()
+}
+
+/// Returns true if a node is 'orphaned' and unreachable from the root node.
+///
+/// ATTENTION: This traverses the graph and is worst case O(n) with respect to
+/// the number of nodes. When possible, prefer to use "get_unreachable_nodes" to
+/// get all the unreachable nodes at once.
+fn is_orphaned_node<N, E>(
+  graph: &Graph<N, E>,
+  root_index: NodeIndex,
+  node_index: NodeIndex,
+) -> bool {
+  let reversed_graph = Reversed(&graph);
+  let mut dfs = Dfs::new(reversed_graph, node_index);
+
+  while let Some(node) = dfs.next(&reversed_graph) {
+    if node == root_index {
+      return false;
+    }
+  }
+
+  true
 }
 
 #[cfg(test)]
 mod test {
+  use super::*;
+
   #[test]
-  fn test_compiles() {}
+  fn test_is_orphaned_node() {
+    let mut graph = ParcelGraphImpl::new();
+    let root = graph.inner.add_node(0);
+
+    let idx1 = graph.inner.add_node(0);
+    let idx2 = graph.inner.add_node(0);
+    let idx3 = graph.inner.add_node(0);
+
+    assert!(is_orphaned_node(&graph.inner, root, idx1));
+    assert!(is_orphaned_node(&graph.inner, root, idx2));
+    assert!(is_orphaned_node(&graph.inner, root, idx3));
+
+    graph.inner.add_edge(root, idx1, 0);
+    assert!(!is_orphaned_node(&graph.inner, root, idx1));
+    assert!(is_orphaned_node(&graph.inner, root, idx2));
+    assert!(is_orphaned_node(&graph.inner, root, idx3));
+
+    graph.inner.add_edge(idx2, idx3, 0);
+    assert!(!is_orphaned_node(&graph.inner, root, idx1));
+    assert!(is_orphaned_node(&graph.inner, root, idx2));
+    assert!(is_orphaned_node(&graph.inner, root, idx3));
+
+    graph.inner.add_edge(idx1, idx2, 0);
+    assert!(!is_orphaned_node(&graph.inner, root, idx1));
+    assert!(!is_orphaned_node(&graph.inner, root, idx2));
+    assert!(!is_orphaned_node(&graph.inner, root, idx3));
+  }
+
+  #[test]
+  fn test_get_unreachable_nodes_on_disconnected_graph() {
+    let mut graph = ParcelGraphImpl::new();
+    let root = graph.inner.add_node(0);
+
+    let idx1 = graph.inner.add_node(0);
+    let idx2 = graph.inner.add_node(0);
+    let idx3 = graph.inner.add_node(0);
+
+    let unreachable = get_unreachable_nodes(&graph.inner, root);
+    assert_eq!(unreachable.len(), 3);
+    assert_eq!(unreachable, vec![idx1, idx2, idx3]);
+  }
+
+  #[test]
+  fn test_get_unreachable_nodes_with_direct_root_connection() {
+    let mut graph = ParcelGraphImpl::new();
+    let root = graph.inner.add_node(0);
+
+    let idx1 = graph.inner.add_node(0);
+    let idx2 = graph.inner.add_node(0);
+
+    graph.inner.add_edge(root, idx1, 0);
+
+    let unreachable = get_unreachable_nodes(&graph.inner, root);
+    assert_eq!(unreachable.len(), 1);
+    assert_eq!(unreachable, vec![idx2]);
+  }
+
+  #[test]
+  fn test_get_unreachable_nodes_with_indirect_root_connection() {
+    let mut graph = ParcelGraphImpl::new();
+    let root = graph.inner.add_node(0);
+
+    let idx1 = graph.inner.add_node(0);
+    let idx2 = graph.inner.add_node(0);
+    let idx3 = graph.inner.add_node(0);
+
+    graph.inner.add_edge(root, idx1, 0);
+    graph.inner.add_edge(idx1, idx2, 0);
+
+    let unreachable = get_unreachable_nodes(&graph.inner, root);
+    assert_eq!(unreachable.len(), 1);
+    assert_eq!(unreachable, vec![idx3]);
+
+    graph.inner.add_edge(idx2, idx3, 0);
+    let unreachable = get_unreachable_nodes(&graph.inner, root);
+    assert_eq!(unreachable.len(), 0);
+    assert_eq!(unreachable, vec![]);
+  }
 }

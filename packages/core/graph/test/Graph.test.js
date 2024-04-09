@@ -47,16 +47,16 @@ describe('Graph', () => {
     let graph = new Graph();
     let node = graph.addNode({});
     assert.throws(() => {
-      graph.addEdge(node, toNodeId(-1));
-    }, /"to" node '-1' not found/);
+      graph.addEdge(node, toNodeId(155));
+    }, /"to" node '155' not found/);
   });
 
   it("errors when adding an edge from a node that doesn't exist", () => {
     let graph = new Graph();
     let node = graph.addNode({});
     assert.throws(() => {
-      graph.addEdge(toNodeId(-1), node);
-    }, /"from" node '-1' not found/);
+      graph.addEdge(toNodeId(100), node);
+    }, /"from" node '100' not found/);
   });
 
   it('hasNode should return a boolean based on whether the node exists in the graph', () => {

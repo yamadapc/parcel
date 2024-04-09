@@ -129,9 +129,6 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     to: NodeId,
     type: TEdgeType | NullEdgeType = 1,
   ): boolean {
-    this._assertHasNodeId(from);
-    this._assertHasNodeId(to);
-    // console.log('addEdge', { from, to, type })
     this.inner.addEdge(from, to, type);
     return true;
   }
@@ -207,8 +204,7 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
   }
 
   isOrphanedNode(nodeId: NodeId): boolean {
-    // TODO: need to search up to root
-    return false;
+    return this.inner.isOrphanedNode(this.rootNodeId, nodeId);
   }
 
   updateNode(nodeId: NodeId, node: TNode): void {
