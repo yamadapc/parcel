@@ -86,7 +86,6 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     });
   }
 
-  // TODO serialise the graph itself
   serialize(): SerializedParcelGraph<TNode, TEdgeType> {
     return {
       // nodes: this.nodes,
@@ -96,12 +95,9 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     };
   }
 
-  // TODO
   // Returns an iterator of all edges in the graph. This can be large, so iterating
   // the complete list can be costly in large graphs. Used when merging graphs.
   getAllEdges(): Iterator<Edge<TEdgeType | NullEdgeType>> {
-    // TODO
-    // return this.adjacencyList.getAllEdges();
     return this.inner.getAllEdges().map(descr => ({
       from: descr.from,
       to: descr.to,
@@ -178,6 +174,16 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
   removeNode(nodeId: NodeId) {
     this.inner.removeNode(nodeId);
     delete this.nodesById[nodeId];
+
+    // TODO: do not call this on removal as it is slow
+    this.cleanUp();
+  }
+
+  cleanUp() {
+    const nodes = this.inner.getUnreachableNodes(this.rootNodeId);
+    nodes.forEach(nodeId => {
+      this.removeNode(nodeId);
+    });
   }
 
   removeEdges(nodeId: NodeId, type: TEdgeType | NullEdgeType = 1) {
@@ -185,6 +191,7 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
       nodeId,
       Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
     );
+    this.cleanUp();
   }
 
   removeEdge(
@@ -201,6 +208,7 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
       Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
       removeOrphans,
     );
+    this.cleanUp();
   }
 
   isOrphanedNode(nodeId: NodeId): boolean {
@@ -312,7 +320,7 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     visit: GraphTraversalCallback<NodeId, TraversalActions>,
     startNodeId: ?NodeId,
   ): void {
-    // TODO: implement in rust
+    this.inner.postOrderDfs(startNodeId, visit);
   }
 
   dfs<TContext>({

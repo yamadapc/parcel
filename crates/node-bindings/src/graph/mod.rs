@@ -5,7 +5,7 @@ use napi::bindgen_prelude::Buffer;
 use napi::{Env, JsFunction, JsUnknown};
 use napi_derive::napi;
 use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::visit::{Dfs, EdgeRef, NodeRef, Reversed};
+use petgraph::visit::{Dfs, DfsPostOrder, EdgeRef, NodeRef, Reversed};
 use petgraph::{Directed, Direction, Graph};
 use postcard::{from_bytes, to_allocvec};
 use serde::{Deserialize, Serialize};
@@ -381,6 +381,27 @@ impl ParcelGraphImpl {
       .into_iter()
       .map(|node| node.index() as u32)
       .collect()
+  }
+
+  ///
+  #[napi]
+  pub fn post_order_dfs(
+    &self,
+    env: Env,
+    start_node: JSNodeIndex,
+    visit: JsFunction,
+  ) -> napi::Result<()> {
+    let start_node = NodeIndex::new(start_node as usize);
+    let mut dfs = DfsPostOrder::new(&self.inner, start_node);
+
+    while let Some(node) = dfs.next(&self.inner) {
+      let js_node_idx = env.create_int64(node.index() as i64)?;
+      visit
+        .call(None, &[&js_node_idx.into_unknown()])?
+        .into_unknown();
+    }
+
+    Ok(())
   }
 
   #[napi]
