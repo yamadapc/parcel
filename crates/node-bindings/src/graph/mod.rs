@@ -14,11 +14,18 @@ use dfs_actions::DFSActions;
 
 mod dfs_actions;
 
+/// All node indexes are represented by a u32. This allows the least expensive translation with JS.
 type JSNodeIndex = u32;
+/// All edge indexes are represented by a u32. This allows the least expensive translation with JS.
 type JSEdgeIndex = u32;
+/// All node weights are a u32. This is not necessary and unused. We could use a unit type here.
 type NodeWeight = u32;
+/// All edge weights are a u32. This is not necessary and unused. We could use a unit type here.
 type EdgeWeight = u32;
 
+/// Edge object when JavaScript lists edges.
+/// This incurs copying so it's not optimal. Ideally the nº of listed edges is not very sensitive.
+/// Ideally we will take the code that lists edges and move it across so we return less data.
 #[napi(object)]
 pub struct EdgeDescriptor {
   pub from: JSNodeIndex,
@@ -29,14 +36,11 @@ pub struct EdgeDescriptor {
 /// Internal graph used for Parcel bundle/asset/request tracking, wraps petgraph
 /// Edges and nodes have number weights
 #[napi]
+#[derive(Debug, Clone)]
 pub struct ParcelGraphImpl {
   inner: Graph<NodeWeight, EdgeWeight, Directed, u32>,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct SerializedGraph {
-  nodes: Vec<u32>,
-  edges: Vec<(u32, u32, EdgeWeight)>,
+  /// See `remove_node`
+  removed_nodes: HashSet<NodeIndex>,
 }
 
 // MARK: JavaScript API
@@ -46,81 +50,110 @@ impl ParcelGraphImpl {
   /// The graph is directed and has u32 weights for both nodes and edges.
   ///
   /// JavaScript owns the graph instance.
-  #[napi(constructor)]
+  ///
+  /// NOTE: Not using `napi(constructor)` because that breaks RustRover
+  /// https://youtrack.jetbrains.com/issue/RUST-11565
+  #[napi]
   pub fn new() -> Self {
     Self {
       inner: Graph::new(),
+      removed_nodes: HashSet::new(),
     }
   }
 
   /// Deserialize a graph from a buffer.
-  #[napi(factory)]
+  ///
+  /// NOTE: Not using `napi(factory)` because that breaks RustRover
+  /// https://youtrack.jetbrains.com/issue/RUST-11565
+  #[napi]
   pub fn deserialize(serialized: Buffer) -> napi::Result<Self> {
-    let mut output = Self::new();
     let value = serialized.as_ref();
-    let archive: SerializedGraph =
+    let serialized_graph: SerializedGraph =
       from_bytes(value).map_err(|_| napi::Error::from_reason("Failed to deserialize"))?;
-    for node in archive.nodes.iter() {
-      output.add_node(*node);
-    }
-    for edge in archive.edges.iter() {
-      output.add_edge(edge.0, edge.1, edge.2)?;
-    }
-    Ok(output)
+    Ok(Self::from(&serialized_graph))
   }
 
-  /// Serialize the graph to a buffer.
+  /// Serialize the graph to a buffer. This copies the Graph data into a `SerializedGraph`,
+  /// but the buffer is not copied into JavaScript. So we can optimise this quite a bit further.
   #[napi]
   pub fn serialize(&self, _env: Env) -> napi::Result<Buffer> {
-    let serialized = SerializedGraph {
-      nodes: self
-        .inner
-        .raw_nodes()
-        .iter()
-        .map(|item| item.weight)
-        .collect(),
-      edges: self
-        .inner
-        .raw_edges()
-        .iter()
-        .map(|item| {
-          (
-            item.source().index() as u32,
-            item.target().index() as u32,
-            item.weight,
-          )
-        })
-        .collect(),
-    };
+    let serialized = SerializedGraph::from(self);
     let serialized =
       to_allocvec(&serialized).map_err(|_err| napi::Error::from_reason("Failed to serialize"))?;
     Ok(Buffer::from(serialized.as_ref()))
   }
 
+  /// Add a node and return its index
+  ///
+  /// O(1) amortized ; but might resize internal vectors
   #[napi]
   pub fn add_node(&mut self, weight: NodeWeight) -> JSNodeIndex {
     self.inner.add_node(weight).index() as u32
   }
 
+  /// Return true if a node exists in the Graph
+  ///
+  /// O(1)
   #[napi]
   pub fn has_node(&self, node_index: JSNodeIndex) -> bool {
-    self
-      .inner
-      .node_weight(NodeIndex::new(node_index as usize))
-      .is_some()
+    let node_index = NodeIndex::new(node_index as usize);
+    if self.removed_nodes.contains(&node_index) {
+      return false;
+    }
+
+    self.inner.node_weight(node_index).is_some()
   }
 
+  /// Query the weight of a node.
+  ///
+  /// O(1)
   #[napi]
   pub fn node_weight(&self, node_index: JSNodeIndex) -> Option<NodeWeight> {
+    if self
+      .removed_nodes
+      .contains(&NodeIndex::new(node_index as usize))
+    {
+      return None;
+    }
+
     self
       .inner
       .node_weight(NodeIndex::new(node_index as usize))
       .cloned()
   }
 
+  /// Mark node as removed.
+  /// petgraph removal will invalidate the last node index since it will be moved.
+  ///
+  /// Ideally we would remove the node and fix the JS side to make sure it's okay with
+  /// indexes changing. This is much better as otherwise the Graph never shrinks.
   #[napi]
   pub fn remove_node(&mut self, node_index: JSNodeIndex) {
-    self.inner.remove_node(NodeIndex::new(node_index as usize));
+    // petgraph node removal will invalidate the last node index since it will be moved
+    // to the removed node index.
+    // Because of this, we will not remove the node, but instead mark it as removed.
+    // self.inner.remove_node(NodeIndex::new(node_index as usize));
+    self.removed_nodes.insert(node_index.into());
+
+    let get_edges = |inner: &Graph<NodeWeight, EdgeWeight>, direction| {
+      inner
+        .edges_directed(NodeIndex::new(node_index as usize), direction)
+        .map(|edge| edge.id())
+        .collect::<Vec<EdgeIndex>>()
+    };
+    for edge in get_edges(&self.inner, Direction::Outgoing) {
+      self.inner.remove_edge(edge);
+    }
+
+    for edge in get_edges(&self.inner, Direction::Incoming) {
+      self.inner.remove_edge(edge);
+    }
+  }
+
+  /// Count the number of nodes on the graph.
+  #[napi]
+  pub fn node_count(&self) -> u32 {
+    self.inner.node_count() as u32 - self.removed_nodes.len() as u32
   }
 
   #[napi]
@@ -132,12 +165,12 @@ impl ParcelGraphImpl {
   ) -> napi::Result<JSEdgeIndex> {
     let from = NodeIndex::new(js_from as usize);
     let to = NodeIndex::new(js_to as usize);
-    if self.inner.node_weight(from).is_none() {
+    if !self.has_node(js_from) {
       return Err(napi::Error::from_reason(format!(
         "\"from\" node '{js_from}' not found"
       )));
     }
-    if self.inner.node_weight(to).is_none() {
+    if !self.has_node(js_to) {
       return Err(napi::Error::from_reason(format!(
         "\"to\" node '{js_to}' not found"
       )));
@@ -154,6 +187,10 @@ impl ParcelGraphImpl {
     to: JSNodeIndex,
     maybe_weight: Vec<EdgeWeight>,
   ) -> bool {
+    if !self.has_node(from) || !self.has_node(to) {
+      return false;
+    }
+
     self
       .inner
       .edges_connecting(NodeIndex::new(from as usize), NodeIndex::new(to as usize))
@@ -413,6 +450,66 @@ impl ParcelGraphImpl {
   }
 }
 
+// MARK: Serialized Graph and conversion functions
+
+/// The graph is serialized to a list of nodes and a list of edges.
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct SerializedGraph {
+  nodes: Vec<u32>,
+  edges: Vec<(u32, u32, EdgeWeight)>,
+  removed_nodes: Vec<u32>,
+}
+
+impl From<&ParcelGraphImpl> for SerializedGraph {
+  fn from(value: &ParcelGraphImpl) -> Self {
+    SerializedGraph {
+      removed_nodes: value
+        .removed_nodes
+        .iter()
+        .map(|item| item.index() as u32)
+        .collect(),
+      nodes: value
+        .inner
+        .raw_nodes()
+        .iter()
+        .map(|item| item.weight)
+        .collect(),
+      edges: value
+        .inner
+        .raw_edges()
+        .iter()
+        .map(|item| {
+          (
+            item.source().index() as u32,
+            item.target().index() as u32,
+            item.weight,
+          )
+        })
+        .collect(),
+    }
+  }
+}
+
+impl From<&SerializedGraph> for ParcelGraphImpl {
+  fn from(value: &SerializedGraph) -> Self {
+    let mut output: ParcelGraphImpl = Self::new();
+    output.removed_nodes = value
+      .removed_nodes
+      .iter()
+      .map(|index| NodeIndex::new(*index as usize))
+      .collect();
+    for node in value.nodes.iter() {
+      output.inner.add_node(*node);
+    }
+    for edge in value.edges.iter() {
+      output.inner.add_edge(edge.0.into(), edge.1.into(), edge.2);
+    }
+    output
+  }
+}
+
+// MARK: Algorithm helpers
+
 /// Given a graph and root index, get the list of nodes that are disconnected from the
 /// root and unreachable.
 ///
@@ -458,6 +555,121 @@ fn is_orphaned_node<N, E>(
 #[cfg(test)]
 mod test {
   use super::*;
+
+  /// Assert two graphs are equal.
+  fn assert_graph_is_equal(graph: &ParcelGraphImpl, other: &ParcelGraphImpl) {
+    assert_eq!(graph.node_count(), other.node_count());
+    assert_eq!(graph.removed_nodes, other.removed_nodes);
+    assert_eq!(
+      graph
+        .inner
+        .raw_nodes()
+        .iter()
+        .map(|node| node.weight)
+        .collect::<Vec<NodeWeight>>(),
+      other
+        .inner
+        .raw_nodes()
+        .iter()
+        .map(|node| node.weight)
+        .collect::<Vec<NodeWeight>>()
+    );
+    assert_eq!(
+      graph
+        .inner
+        .raw_edges()
+        .iter()
+        .map(|node| node.weight)
+        .collect::<Vec<NodeWeight>>(),
+      other
+        .inner
+        .raw_edges()
+        .iter()
+        .map(|node| node.weight)
+        .collect::<Vec<NodeWeight>>()
+    );
+  }
+
+  #[test]
+  fn test_serialize_graph() {
+    let mut graph: ParcelGraphImpl = ParcelGraphImpl::new();
+    let root = graph.inner.add_node(0);
+    let idx1 = graph.inner.add_node(0);
+    let idx2 = graph.inner.add_node(0);
+    let idx3 = graph.inner.add_node(0);
+    graph.remove_node(idx3.index() as JSNodeIndex);
+
+    graph.inner.add_edge(root, idx1, 0);
+    graph.inner.add_edge(idx1, idx2, 0);
+
+    let serialized = SerializedGraph::from(&graph);
+    let deserialized = ParcelGraphImpl::from(&serialized);
+    assert_graph_is_equal(&graph, &deserialized);
+  }
+
+  #[test]
+  fn test_add_node() {
+    let mut graph = ParcelGraphImpl::new();
+    let idx1 = graph.add_node(0);
+    let idx2 = graph.add_node(0);
+    let idx3 = graph.add_node(0);
+    assert_eq!(graph.node_count(), 3);
+    assert_eq!(idx1, 0);
+    assert_eq!(idx2, 1);
+    assert_eq!(idx3, 2);
+  }
+
+  #[test]
+  fn test_has_node() {
+    let mut graph = ParcelGraphImpl::new();
+    let idx1 = graph.add_node(0);
+    let idx2 = graph.add_node(0);
+    assert!(graph.has_node(idx1));
+    assert!(graph.has_node(idx2));
+    assert!(!graph.has_node(3));
+  }
+
+  #[test]
+  fn test_node_weight() {
+    let mut graph = ParcelGraphImpl::new();
+    let idx1 = graph.add_node(42);
+    let idx2 = graph.add_node(43);
+    assert_eq!(graph.node_weight(idx1), Some(42));
+    assert_eq!(graph.node_weight(idx2), Some(43));
+    assert_eq!(graph.node_weight(3), None);
+  }
+
+  #[test]
+  fn test_remove_node() {
+    let mut graph = ParcelGraphImpl::new();
+    let idx1 = graph.add_node(0);
+    let idx2 = graph.add_node(0);
+    let idx3 = graph.add_node(0);
+    assert_eq!(graph.node_count(), 3);
+
+    graph.remove_node(idx2);
+    assert_eq!(graph.node_count(), 2);
+    assert!(graph.has_node(idx1));
+    assert!(!graph.has_node(idx2));
+    assert!(graph.has_node(idx3));
+  }
+
+  #[test]
+  fn test_node_count_increases_when_node_is_added() {
+    let mut graph = ParcelGraphImpl::new();
+    assert_eq!(graph.node_count(), 0);
+    graph.add_node(0);
+    assert_eq!(graph.node_count(), 1);
+  }
+
+  #[test]
+  fn test_node_count_decreases_when_node_is_removed() {
+    let mut graph = ParcelGraphImpl::new();
+    let idx = graph.add_node(0);
+    assert_eq!(graph.node_count(), 1);
+    graph.remove_node(idx);
+    assert_eq!(graph.node_count(), 0);
+  }
 
   #[test]
   fn test_is_orphaned_node() {

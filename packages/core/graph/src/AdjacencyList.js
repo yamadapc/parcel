@@ -3,8 +3,9 @@ import assert from 'assert';
 import nullthrows from 'nullthrows';
 import {SharedBuffer} from './shared-buffer';
 import {fromNodeId, toNodeId} from './types';
-import {ALL_EDGE_TYPES, type NullEdgeType, type AllEdgeTypes} from './Graph';
 import type {NodeId} from './types';
+import {ALL_EDGE_TYPES} from './Graph/common';
+import type {AllEdgeTypes, NullEdgeType} from './Graph/common';
 
 /** The address of the node in the nodes map. */
 opaque type NodeAddress = number;
