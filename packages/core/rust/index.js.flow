@@ -156,6 +156,8 @@ declare export class ParcelGraphImpl {
     from: JSNodeIndex,
     to: JSNodeIndex,
     maybeWeight: EdgeWeight[],
+    removeOrphans: boolean,
+    rootIndex: JSNodeIndex
   ): void;
   removeEdges(nodeIndex: JSNodeIndex, maybeWeight: EdgeWeight[]): void;
   getNodeIdsConnectedTo(

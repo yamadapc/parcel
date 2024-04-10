@@ -183,7 +183,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
       fromNodeId(to),
       getMaybeWeight(type),
       removeOrphans,
-      this.rootNodeId,
+      fromNodeId(this.rootNodeId),
     );
   }
 
