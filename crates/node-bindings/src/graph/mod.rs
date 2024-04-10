@@ -226,6 +226,13 @@ impl ParcelGraphImpl {
       .collect()
   }
 
+  /// Remove an edge from the graph.
+  ///
+  /// Due to how petgraph is implemented, removal will relocate edges. This means that
+  /// the last edge on the graph will change IDs after edges are removed.
+  ///
+  /// Also, clean-up unreachable nodes. Without the clean-up step this would be O(1)
+  /// but due to the clean-up step this is worst case O(n).
   #[napi]
   pub fn remove_edge(
     &mut self,
@@ -273,6 +280,7 @@ impl ParcelGraphImpl {
     Ok(())
   }
 
+  /// Remove a list of edges. Does not run clean-up
   #[napi]
   pub fn remove_edges(&mut self, node_index: JSNodeIndex, maybe_weight: Vec<EdgeWeight>) {
     let indexes_to_remove = self
@@ -292,6 +300,7 @@ impl ParcelGraphImpl {
     }
   }
 
+  /// Get the node indexes connected incoming into a node.
   #[napi]
   pub fn get_node_ids_connected_to(
     &self,
@@ -312,6 +321,7 @@ impl ParcelGraphImpl {
       .collect()
   }
 
+  /// Get the node indexes connected outgoing from a node.
   #[napi]
   pub fn get_node_ids_connected_from(
     &self,
@@ -443,7 +453,7 @@ impl ParcelGraphImpl {
       .collect()
   }
 
-  ///
+  /// Run DFS but in post-order.
   #[napi]
   pub fn post_order_dfs(
     &self,
