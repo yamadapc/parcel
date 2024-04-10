@@ -75,11 +75,11 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
   }
 
   hasNode(id: NodeId): boolean {
-    return this.nodes[id] != null;
+    return this.nodes[fromNodeId(id)] != null;
   }
 
   getNode(id: NodeId): ?TNode {
-    return this.nodes[id];
+    return this.nodes[fromNodeId(id)];
   }
 
   addEdge(
@@ -159,7 +159,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
       this._removeEdge(nodeId, to, type);
     }
 
-    this.nodes[nodeId] = null;
+    this.nodes[fromNodeId(nodeId)] = null;
   }
 
   removeEdges(nodeId: NodeId, type: TEdgeType | NullEdgeType = 1) {
@@ -239,7 +239,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
 
   updateNode(nodeId: NodeId, node: TNode): void {
     this._assertHasNodeId(nodeId);
-    this.nodes[nodeId] = node;
+    this.nodes[fromNodeId(nodeId)] = node;
   }
 
   // Update a node's downstream nodes making sure to prune any orphaned branches
@@ -355,8 +355,8 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     let queue = [{nodeId: traversalStartNode, context: null}];
     while (queue.length !== 0) {
       let {nodeId, context} = queue.pop();
-      if (!this.hasNode(nodeId) || visited.has(nodeId)) continue;
-      visited.add(nodeId);
+      if (!this.hasNode(nodeId) || visited.has(fromNodeId(nodeId))) continue;
+      visited.add(fromNodeId(nodeId));
 
       skipped = false;
       let newContext = visit(nodeId, context, actions);
@@ -375,7 +375,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
       }
 
       this.#adjacencyList.forEachNodeIdConnectedFromReverse(nodeId, child => {
-        if (!visited.has(child)) {
+        if (!visited.has(fromNodeId(child))) {
           queue.push({nodeId: child, context});
         }
         return false;
@@ -423,11 +423,11 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     while (queue.length !== 0) {
       let nodeId = queue[queue.length - 1];
 
-      if (!visited.has(nodeId)) {
-        visited.add(nodeId);
+      if (!visited.has(fromNodeId(nodeId))) {
+        visited.add(fromNodeId(nodeId));
 
         this.#adjacencyList.forEachNodeIdConnectedFromReverse(nodeId, child => {
-          if (!visited.has(child)) {
+          if (!visited.has(fromNodeId(child))) {
             queue.push(child);
           }
           return false;
@@ -486,7 +486,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
 
     let walk = (nodeId, context: ?TContext) => {
       if (!this.hasNode(nodeId)) return;
-      visited.add(nodeId);
+      visited.add(fromNodeId(nodeId));
 
       skipped = false;
       let enter = typeof visit === 'function' ? visit : visit.enter;
@@ -507,11 +507,11 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
       }
 
       for (let child of getChildren(nodeId)) {
-        if (visited.has(child)) {
+        if (visited.has(fromNodeId(child))) {
           continue;
         }
 
-        visited.add(child);
+        visited.add(fromNodeId(child));
         let result = walk(child, context);
         if (stopped) {
           return result;

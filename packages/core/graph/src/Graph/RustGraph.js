@@ -2,7 +2,7 @@
 
 import {ParcelGraphImpl} from '@parcel/rust';
 import type {Edge, NodeId} from '../types';
-import {fromNodeId} from '../types';
+import {fromNodeId, toNodeId, toNodeIds} from '../types';
 import type {
   AllEdgeTypes,
   GraphOpts,
@@ -40,7 +40,7 @@ function getMaybeWeight(type: null | number | number[]): number[] {
 export class RustGraph<TNode, TEdgeType: number = 1> {
   nodesById: {[id: number]: TNode};
   inner: ParcelGraphImpl;
-  rootNodeId: NodeId = 0;
+  rootNodeId: NodeId = toNodeId(0);
 
   constructor(opts: ?GraphOpts<TNode, TEdgeType>) {
     // this.nodes = opts?.nodes || [];
@@ -77,7 +77,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
    * starting point and is used to determine disconnected nodes.
    */
   setRootNodeId(id: ?NodeId) {
-    this.rootNodeId = id ?? 0;
+    this.rootNodeId = id ?? toNodeId(0);
   }
 
   static deserialize(
@@ -103,8 +103,8 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   // the complete list can be costly in large graphs. Used when merging graphs.
   getAllEdges(): Array<Edge<TEdgeType>> {
     return this.inner.getAllEdges().map(descr => ({
-      from: descr.from,
-      to: descr.to,
+      from: toNodeId(descr.from),
+      to: toNodeId(descr.to),
       // $FlowFixMe Rust returns nº; can't prove to flow it's right
       type: descr.weight,
     }));
@@ -114,56 +114,70 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     let id = this.inner.addNode(0);
     // console.log('addNode', {node, id })
     this.nodesById[id] = node;
-    return id;
+    return toNodeId(id);
   }
 
   hasNode(id: NodeId): boolean {
-    return this.nodesById[id] != null;
+    return this.nodesById[fromNodeId(id)] != null;
   }
 
   getNode(id: NodeId): ?TNode {
-    return this.nodesById[id];
+    return this.nodesById[fromNodeId(id)];
   }
 
   addEdge(from: NodeId, to: NodeId, type: number = 1): boolean {
-    this.inner.addEdge(from, to, type);
+    this.inner.addEdge(fromNodeId(from), fromNodeId(to), type);
     return true;
   }
 
   hasEdge(from: NodeId, to: NodeId, type: number | number[] = 1): boolean {
-    return this.inner.hasEdge(from, to, getMaybeWeight(type));
+    return this.inner.hasEdge(
+      fromNodeId(from),
+      fromNodeId(to),
+      getMaybeWeight(type),
+    );
   }
 
   getNodeIdsConnectedTo(
     nodeId: NodeId,
     type: number | number[] = 1,
   ): Array<NodeId> {
-    return this.inner.getNodeIdsConnectedTo(nodeId, getMaybeWeight(type));
+    return toNodeIds(
+      this.inner.getNodeIdsConnectedTo(
+        fromNodeId(nodeId),
+        getMaybeWeight(type),
+      ),
+    );
   }
 
   getNodeIdsConnectedFrom(
     nodeId: NodeId,
     type: number | number[] = 1,
   ): Array<NodeId> {
-    return this.inner.getNodeIdsConnectedFrom(nodeId, getMaybeWeight(type));
+    return toNodeIds(
+      this.inner.getNodeIdsConnectedFrom(
+        fromNodeId(nodeId),
+        getMaybeWeight(type),
+      ),
+    );
   }
 
   // Removes node and any edges coming from or to that node
   removeNode(nodeId: NodeId) {
-    this.inner.removeNode(nodeId);
-    delete this.nodesById[nodeId];
+    this.inner.removeNode(fromNodeId(nodeId));
+    delete this.nodesById[fromNodeId(nodeId)];
   }
 
   // TODO: do not call this on removal as it is slow; move to rust
   cleanUp() {
-    const nodes = this.inner.getUnreachableNodes(this.rootNodeId);
+    const nodes = this.inner.getUnreachableNodes(fromNodeId(this.rootNodeId));
     nodes.forEach(nodeId => {
-      this.removeNode(nodeId);
+      this.removeNode(toNodeId(nodeId));
     });
   }
 
   removeEdges(nodeId: NodeId, type: TEdgeType | NullEdgeType = 1) {
-    this.inner.removeEdges(nodeId, getMaybeWeight(type));
+    this.inner.removeEdges(fromNodeId(nodeId), getMaybeWeight(type));
   }
 
   removeEdge(
@@ -175,21 +189,23 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     removeOrphans: boolean = true,
   ) {
     this.inner.removeEdge(
-      from,
-      to,
-
+      fromNodeId(from),
+      fromNodeId(to),
       getMaybeWeight(type),
       // removeOrphans,
     );
   }
 
   isOrphanedNode(nodeId: NodeId): boolean {
-    return this.inner.isOrphanedNode(this.rootNodeId, nodeId);
+    return this.inner.isOrphanedNode(
+      fromNodeId(this.rootNodeId),
+      fromNodeId(nodeId),
+    );
   }
 
   updateNode(nodeId: NodeId, node: TNode): void {
     this._assertHasNodeId(nodeId);
-    this.nodesById[nodeId] = node;
+    this.nodesById[fromNodeId(nodeId)] = node;
   }
 
   // Update a node's downstream nodes making sure to prune any orphaned branches
@@ -234,7 +250,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
 
     if (enter) {
       this.inner.dfs(
-        traversalStartNode,
+        fromNodeId(traversalStartNode),
         enter,
         typeof visit !== 'function' ? visit.exit ?? null : null,
         getMaybeWeight(type),
@@ -270,7 +286,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
 
     if (enter) {
       return this.inner.dfs(
-        traversalStartNode,
+        fromNodeId(traversalStartNode),
         enter,
         typeof visit !== 'function' ? visit.exit ?? null : null,
         getMaybeWeight(type),
@@ -284,7 +300,8 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     visit: GraphTraversalCallback<NodeId, TraversalActions>,
     startNodeId: ?NodeId,
   ): void {
-    this.inner.postOrderDfs(startNodeId ?? this.rootNodeId ?? 0, visit);
+    const start = startNodeId ?? this.rootNodeId ?? 0;
+    this.inner.postOrderDfs(fromNodeId(start), visit);
   }
 
   dfs<TContext>({
@@ -302,7 +319,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
 
     if (enter && startNodeId != null) {
       return this.inner.dfs(
-        startNodeId,
+        fromNodeId(startNodeId),
         enter,
         typeof visit !== 'function' ? visit.exit ?? null : null,
         [],
@@ -312,8 +329,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   }
 
   topoSort(): Array<NodeId> {
-    // type?: TEdgeType
-    return this.inner.topoSort();
+    return toNodeIds(this.inner.topoSort());
   }
 
   findAncestor(nodeId: NodeId, fn: (nodeId: NodeId) => boolean): ?NodeId {

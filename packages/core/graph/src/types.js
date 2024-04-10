@@ -2,10 +2,20 @@
 
 // forcing NodeId to be opaque as it should only be created once
 export type NodeId = number;
+
 export function toNodeId(x: number): NodeId {
   return x;
 }
+
 export function fromNodeId(x: NodeId): number {
+  return x;
+}
+
+export function toNodeIds(x: number[]): NodeId[] {
+  return x;
+}
+
+export function fromNodeIds(x: NodeId[]): number[] {
   return x;
 }
 
