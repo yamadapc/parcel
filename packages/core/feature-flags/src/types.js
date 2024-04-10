@@ -9,4 +9,8 @@ export type FeatureFlags = {|
    * `config.getConfigFrom(..., {packageKey: '...'})` and the value itself hasn't changed.
    */
   +configKeyInvalidation: boolean,
+  /**
+   * Moves the @parcel/graph internal implementation to rust.
+   */
+  +rustBackedGraph: boolean,
 |};

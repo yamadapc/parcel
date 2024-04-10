@@ -12,6 +12,7 @@ import type {
 import {BitSet} from './BitSet';
 
 import nullthrows from 'nullthrows';
+import {getFeatureFlag} from '@parcel/feature-flags/src';
 
 export type NullEdgeType = 1;
 export type GraphOpts<TNode, TEdgeType: number = 1> = {|
@@ -50,13 +51,15 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
       ? ParcelGraphImpl.deserialize(opts?.graph)
       : new ParcelGraphImpl();
 
-    if (opts?.graph) {
-      console.log(opts.graph);
-    }
-
     this.setRootNodeId(opts?.rootNodeId);
   }
 
+  /**
+   * Entries iterator for backwards compatibility.
+   *
+   * Ideally this should be removed and the consumers should use higher-level
+   * APIs rather than listing nodes directly.
+   */
   get nodes(): {|
     entries(): [NodeId, TNode][],
   |} {
@@ -71,6 +74,10 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
     return values;
   }
 
+  /**
+   * Set the root node id for the graph. This will be used as the traversal
+   * starting point and is used to determine disconnected nodes.
+   */
   setRootNodeId(id: ?NodeId) {
     this.rootNodeId = id;
   }
@@ -174,11 +181,9 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
   removeNode(nodeId: NodeId) {
     this.inner.removeNode(nodeId);
     delete this.nodesById[nodeId];
-
-    // TODO: do not call this on removal as it is slow
-    this.cleanUp();
   }
 
+  // TODO: do not call this on removal as it is slow; move to rust
   cleanUp() {
     const nodes = this.inner.getUnreachableNodes(this.rootNodeId);
     nodes.forEach(nodeId => {
@@ -191,7 +196,6 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
       nodeId,
       Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
     );
-    this.cleanUp();
   }
 
   removeEdge(
@@ -208,7 +212,6 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
       Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
       removeOrphans,
     );
-    this.cleanUp();
   }
 
   isOrphanedNode(nodeId: NodeId): boolean {
@@ -326,6 +329,7 @@ export class ParcelGraph<TNode, TEdgeType: number = 1> {
   dfs<TContext>({
     visit,
     startNodeId,
+    // TODO: getChildren is not handled in rust
     getChildren,
   }: {|
     visit: GraphVisitor<NodeId, TContext>,
@@ -1024,8 +1028,10 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
   }
 }
 
-export default ParcelGraph;
-// export default JSGraph;
+const Graph = getFeatureFlag('rustBackedGraph') ? ParcelGraph : JSGraph;
+
+export {Graph};
+export default Graph;
 
 export function mapVisitor<NodeId, TValue, TContext>(
   filter: (NodeId, TraversalActions) => ?TValue,
