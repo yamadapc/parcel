@@ -45,7 +45,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
 
   static deserialize(
     opts: GraphOpts<TNode, TEdgeType>,
-  ): Graph<TNode, TEdgeType> {
+  ): JSGraph<TNode, TEdgeType> {
     return new this({
       nodes: opts.nodes,
       adjacencyList: opts.adjacencyList,

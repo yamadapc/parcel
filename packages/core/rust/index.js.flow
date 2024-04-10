@@ -1,14 +1,28 @@
 // @flow
+
 import type {FileCreateInvalidation} from '@parcel/types';
 
 declare export var init: void | (() => void);
 
-declare export function findAncestorFile(filenames: Array<string>, from: string, root: string): string | null
-declare export function findFirstFile(names: Array<string>): string | null
-declare export function findNodeModule(module: string, from: string): string | null
-declare export function hashString(s: string): string
-declare export function hashBuffer(buf: Buffer): string
-declare export function optimizeImage(kind: string, buf: Buffer): Buffer
+declare export function findAncestorFile(
+  filenames: Array<string>,
+  from: string,
+  root: string,
+): string | null;
+
+declare export function findFirstFile(names: Array<string>): string | null;
+
+declare export function findNodeModule(
+  module: string,
+  from: string,
+): string | null;
+
+declare export function hashString(s: string): string;
+
+declare export function hashBuffer(buf: Buffer): string;
+
+declare export function optimizeImage(kind: string, buf: Buffer): Buffer;
+
 export interface JsFileSystemOptions {
   canonicalize: string => string;
   read: string => Buffer;
@@ -16,22 +30,25 @@ export interface JsFileSystemOptions {
   isDir: string => boolean;
   includeNodeModules?: boolean | Array<string> | {|[string]: boolean|};
 }
+
 export interface FileSystem {
-  fs?: JsFileSystemOptions,
+  fs?: JsFileSystemOptions;
   includeNodeModules?: boolean | Array<string> | {|[string]: boolean|};
-  conditions?: number,
-  moduleDirResolver?: (...args: any[]) => any,
-  mode: number,
-  entries?: number,
-  extensions?: Array<string>,
-  packageExports: boolean
+  conditions?: number;
+  moduleDirResolver?: (...args: any[]) => any;
+  mode: number;
+  entries?: number;
+  extensions?: Array<string>;
+  packageExports: boolean;
 }
+
 export interface ResolveOptions {
   filename: string;
   specifierType: string;
   parent: string;
   packageConditions?: Array<string>;
 }
+
 export type Resolution =
   | {|type: 'Path', value: string|}
   | {|type: 'Builtin', value: string|}
@@ -48,18 +65,23 @@ export interface ResolveResult {
   error: mixed;
   moduleType: number;
 }
+
 export interface JsInvalidations {
   invalidateOnFileChange: Array<string>;
   invalidateOnFileCreate: Array<FileCreateInvalidation>;
   invalidateOnStartup: boolean;
 }
+
 declare export function transform(opts: any): any;
+
 declare export function transformAsync(opts: any): Promise<any>;
+
 declare export class Hash {
   writeString(s: string): void;
   writeBuffer(b: Buffer): void;
   finish(): string;
 }
+
 export interface ResolverOptions {
   fs?: JsFileSystemOptions;
   includeNodeModules?: boolean | Array<string> | {|[string]: boolean|};
@@ -69,6 +91,7 @@ export interface ResolverOptions {
   entries?: number;
   extensions?: Array<string>;
 }
+
 declare export class Resolver {
   constructor(projectRoot: string, options: ResolverOptions): Resolver;
   resolve(options: ResolveOptions): ResolveResult;
@@ -82,22 +105,78 @@ type NodeWeight = number;
 type EdgeWeight = number;
 
 /**
+ * Edge object when JavaScript lists edges.
+ * This incurs copying so it's not optimal. Ideally the nº of listed edges is not very sensitive.
+ * Ideally we will take the code that lists edges and move it across so we return less data.
+ */
+export interface EdgeDescriptor {
+  from: JSNodeIndex;
+  to: JSNodeIndex;
+  weight: EdgeWeight;
+}
+
+/**
  * Internal graph used for Parcel bundle/asset/request tracking, wraps petgraph
  * Edges and nodes have number weights
  */
 declare export class ParcelGraphImpl {
-  constructor(): ParcelGraphImpl;
+  /**
+   * Create a new graph instance. This is currently a `petgraph` adjacency list graph.
+   * The graph is directed and has u32 weights for both nodes and edges.
+   *
+   * JavaScript owns the graph instance.
+   *
+   * NOTE: Not using `napi(constructor)` because that breaks RustRover
+   * https://youtrack.jetbrains.com/issue/RUST-11565
+   */
+  static new(): ParcelGraphImpl;
+  /**
+   * Deserialize a graph from a buffer.
+   *
+   * NOTE: Not using `napi(factory)` because that breaks RustRover
+   * https://youtrack.jetbrains.com/issue/RUST-11565
+   */
+  static deserialize(serialized: Buffer): this;
+  /**
+   * Serialize the graph to a buffer. This copies the Graph data into a `SerializedGraph`,
+   * but the buffer is not copied into JavaScript. So we can optimise this quite a bit further.
+   */
+  serialize(): Buffer;
   addNode(weight: NodeWeight): JSNodeIndex;
   hasNode(nodeIndex: JSNodeIndex): boolean;
   nodeWeight(nodeIndex: JSNodeIndex): NodeWeight | null;
   removeNode(nodeIndex: JSNodeIndex): void;
   addEdge(from: JSNodeIndex, to: JSNodeIndex, weight: EdgeWeight): JSEdgeIndex;
-  hasEdge(from: JSNodeIndex, to: JSNodeIndex, maybeWeight?: EdgeWeight | void | null): boolean;
-  removeEdge(from: JSNodeIndex, to: JSNodeIndex, maybeWeight?: EdgeWeight | void | null): void;
-  removeEdges(nodeIndex: JSNodeIndex, maybeWeight?: EdgeWeight | void | null): void;
-  getNodeIdsConnectedTo(nodeIndex: JSNodeIndex, edgeWeight?: EdgeWeight | void | null): Array<JSNodeIndex>;
-  getNodeIdsConnectedFrom(nodeIndex: JSNodeIndex, edgeWeight?: EdgeWeight | void | null): Array<JSNodeIndex>;
+  hasEdge(
+    from: JSNodeIndex,
+    to: JSNodeIndex,
+    maybeWeight: EdgeWeight[],
+  ): boolean;
+  removeEdge(
+    from: JSNodeIndex,
+    to: JSNodeIndex,
+    maybeWeight: EdgeWeight[],
+  ): void;
+  removeEdges(nodeIndex: JSNodeIndex, maybeWeight: EdgeWeight[]): void;
+  getNodeIdsConnectedTo(
+    nodeIndex: JSNodeIndex,
+    edgeWeight: EdgeWeight[],
+  ): Array<JSNodeIndex>;
+  getNodeIdsConnectedFrom(
+    nodeIndex: JSNodeIndex,
+    edgeWeight: EdgeWeight[],
+  ): Array<JSNodeIndex>;
   /** Will return an empty vec if the graph has a cycle */
   topoSort(): Array<JSNodeIndex>;
-  dfs(startNode: JSNodeIndex, enter: (...args: any[]) => any, exit: null | ((...args: any[]) => any | void | null), typ: number | null, traverseUp: boolean): void;
+  dfs(
+    startNode: JSNodeIndex,
+    enter: (...args: any[]) => any,
+    exit: null | ((...args: any[]) => any | void | null),
+    typ: number[],
+    traverseUp: boolean,
+  ): void;
+  getAllEdges(): Array<EdgeDescriptor>;
+  getUnreachableNodes(rootIndex: JSNodeIndex): Array<JSNodeIndex>;
+  postOrderDfs(startNode: JSNodeIndex, visit: (...args: any[]) => any): void;
+  isOrphanedNode(rootIndex: JSNodeIndex, nodeIndex: JSNodeIndex): boolean;
 }

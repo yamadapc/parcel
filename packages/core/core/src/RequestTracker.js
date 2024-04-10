@@ -1318,7 +1318,7 @@ export default class RequestTracker {
     let requestGraphKey = `requestGraph-${cacheKey}`;
     let snapshotKey = `snapshot-${cacheKey}`;
 
-    if (this.options.shouldDisableCache || true) {
+    if (this.options.shouldDisableCache) {
       return;
     }
 
@@ -1448,7 +1448,7 @@ export default class RequestTracker {
       type: 'cache',
       phase: 'end',
       total,
-      size: Object.keys(this.graph.nodes).length,
+      size: this.graph.nodes.length,
     });
   }
 

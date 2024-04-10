@@ -121,7 +121,6 @@ import {toNodeId} from '../src/types';
       graph.addEdge(nodeB, nodeD);
 
       graph.removeEdge(nodeA, nodeB);
-      graph.cleanUp();
       assert(graph.hasNode(nodeA));
       assert(graph.hasNode(nodeD));
       // assert(!graph.hasNode(nodeB));

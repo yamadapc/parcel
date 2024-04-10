@@ -1,6 +1,6 @@
 // @flow strict
 
-import type {FeatureFlags as _FeatureFlags} from './types';
+import type {FeatureFlagKey, FeatureFlags as _FeatureFlags} from './types';
 // We need to do these gymnastics as we don't want flow-to-ts to touch DEFAULT_FEATURE_FLAGS,
 // but we want to export FeatureFlags for Flow
 export type FeatureFlags = _FeatureFlags;
@@ -13,10 +13,14 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
 
 let featureFlagValues: FeatureFlags = {...DEFAULT_FEATURE_FLAGS};
 
+export function setFeatureFlag(flagName: FeatureFlagKey, value: boolean) {
+  featureFlagValues[flagName] = value;
+}
+
 export function setFeatureFlags(flags: FeatureFlags) {
   featureFlagValues = flags;
 }
 
-export function getFeatureFlag(flagName: $Keys<FeatureFlags>): boolean {
+export function getFeatureFlag(flagName: FeatureFlagKey): boolean {
   return featureFlagValues[flagName];
 }

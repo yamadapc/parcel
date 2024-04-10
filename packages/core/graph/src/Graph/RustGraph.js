@@ -3,7 +3,6 @@
 import {ParcelGraphImpl} from '@parcel/rust';
 import type {Edge, NodeId} from '../types';
 import {fromNodeId} from '../types';
-import {BitSet} from '../BitSet';
 import type {
   AllEdgeTypes,
   GraphOpts,
@@ -19,20 +18,40 @@ import type {
 import nullthrows from 'nullthrows';
 
 /**
+ * Convert all edge `type` parameters into an array of numbers. This is so
+ * the native side doesn't have to support multiple JS input types.
+ *
+ * Perhaps we could change this as an array of numbers isn't going to be the
+ * most efficient representation.
+ */
+function getMaybeWeight(type: null | number | number[]): number[] {
+  if (Array.isArray(type)) {
+    return type.filter(t => t != null && t > -1);
+  }
+  if (type === -1 || type == null) {
+    return [];
+  }
+  return [type];
+}
+
+/**
  * Rust backed graph structure
  */
 export class RustGraph<TNode, TEdgeType: number = 1> {
   nodesById: {[id: number]: TNode};
   inner: ParcelGraphImpl;
-  rootNodeId: ?NodeId;
-  _visited: ?BitSet;
+  rootNodeId: NodeId = 0;
 
   constructor(opts: ?GraphOpts<TNode, TEdgeType>) {
     // this.nodes = opts?.nodes || [];
-    this.nodesById = opts?.nodesById ?? {};
+    this.nodesById =
+      opts?.nodes?.reduce((memo, node, index) => {
+        memo[index] = node;
+        return memo;
+      }, {}) ?? {};
     this.inner = opts?.graph
       ? ParcelGraphImpl.deserialize(opts?.graph)
-      : new ParcelGraphImpl();
+      : ParcelGraphImpl.new();
 
     this.setRootNodeId(opts?.rootNodeId);
   }
@@ -43,18 +62,14 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
    * Ideally this should be removed and the consumers should use higher-level
    * APIs rather than listing nodes directly.
    */
-  get nodes(): {|
-    entries(): [NodeId, TNode][],
-  |} {
-    const nodes = Object.keys(this.nodesById);
-    const values = nodes.map(key => this.nodesById[Number(key)]);
-    values.entries = () => {
-      return nodes.map(key => {
-        const node = this.nodesById[Number(key)];
-        return [Number(key), node];
-      });
-    };
-    return values;
+  get nodes(): TNode[] {
+    const nodes = Object.keys(this.nodesById).map(Number);
+    nodes.sort((a, b) => a - b);
+
+    return nodes.map(key => {
+      const node = this.nodesById[key];
+      return node;
+    });
   }
 
   /**
@@ -62,35 +77,35 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
    * starting point and is used to determine disconnected nodes.
    */
   setRootNodeId(id: ?NodeId) {
-    this.rootNodeId = id;
+    this.rootNodeId = id ?? 0;
   }
 
   static deserialize(
     opts: GraphOpts<TNode, TEdgeType>,
   ): RustGraph<TNode, TEdgeType> {
     return new this({
-      nodesById: opts.nodesById,
+      nodes: opts.nodes,
       graph: opts.graph,
-      // adjacencyList: opts.adjacencyList,
       rootNodeId: opts.rootNodeId,
     });
   }
 
-  serialize(): SerializedParcelGraph<TNode, TEdgeType> {
+  serialize(): SerializedParcelGraph<TNode> {
     return {
-      // nodes: this.nodes,
       graph: this.inner.serialize(),
-      nodesById: this.nodesById,
+      // $FlowFixMe Flow doesn't know that `T[]` is `(T | null)[]`
+      nodes: this.nodes,
       rootNodeId: this.rootNodeId,
     };
   }
 
   // Returns an iterator of all edges in the graph. This can be large, so iterating
   // the complete list can be costly in large graphs. Used when merging graphs.
-  getAllEdges(): Iterator<Edge<TEdgeType | NullEdgeType>> {
+  getAllEdges(): Array<Edge<TEdgeType>> {
     return this.inner.getAllEdges().map(descr => ({
       from: descr.from,
       to: descr.to,
+      // $FlowFixMe Rust returns nº; can't prove to flow it's right
       type: descr.weight,
     }));
   }
@@ -110,54 +125,27 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     return this.nodesById[id];
   }
 
-  addEdge(
-    from: NodeId,
-    to: NodeId,
-    type: TEdgeType | NullEdgeType = 1,
-  ): boolean {
+  addEdge(from: NodeId, to: NodeId, type: number = 1): boolean {
     this.inner.addEdge(from, to, type);
     return true;
   }
 
-  hasEdge(
-    from: NodeId,
-    to: NodeId,
-    type?: TEdgeType | NullEdgeType,
-    //  | Array<TEdgeType | NullEdgeType> = 1,
-  ): boolean {
-    return this.inner.hasEdge(
-      from,
-      to,
-      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
-    );
+  hasEdge(from: NodeId, to: NodeId, type: number | number[] = 1): boolean {
+    return this.inner.hasEdge(from, to, getMaybeWeight(type));
   }
 
   getNodeIdsConnectedTo(
     nodeId: NodeId,
-    type:
-      | TEdgeType
-      | NullEdgeType
-      // | Array<TEdgeType | NullEdgeType>
-      | AllEdgeTypes = 1,
+    type: number | number[] = 1,
   ): Array<NodeId> {
-    return this.inner.getNodeIdsConnectedTo(
-      nodeId,
-      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
-    );
+    return this.inner.getNodeIdsConnectedTo(nodeId, getMaybeWeight(type));
   }
 
   getNodeIdsConnectedFrom(
     nodeId: NodeId,
-    type:
-      | TEdgeType
-      | NullEdgeType
-      // | Array<TEdgeType | NullEdgeType>
-      | AllEdgeTypes = 1,
+    type: number | number[] = 1,
   ): Array<NodeId> {
-    return this.inner.getNodeIdsConnectedFrom(
-      nodeId,
-      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
-    );
+    return this.inner.getNodeIdsConnectedFrom(nodeId, getMaybeWeight(type));
   }
 
   // Removes node and any edges coming from or to that node
@@ -175,25 +163,23 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   }
 
   removeEdges(nodeId: NodeId, type: TEdgeType | NullEdgeType = 1) {
-    this.inner.removeEdges(
-      nodeId,
-      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
-    );
+    this.inner.removeEdges(nodeId, getMaybeWeight(type));
   }
 
   removeEdge(
     from: NodeId,
     to: NodeId,
-    type: TEdgeType | NullEdgeType = 1,
+    type: number = 1,
     // TODO: handle this?
+    // eslint-disable-next-line no-unused-vars
     removeOrphans: boolean = true,
   ) {
     this.inner.removeEdge(
       from,
       to,
 
-      Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
-      removeOrphans,
+      getMaybeWeight(type),
+      // removeOrphans,
     );
   }
 
@@ -211,7 +197,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     fromNodeId: NodeId,
     toNodeIds: $ReadOnlyArray<NodeId>,
     replaceFilter?: null | (NodeId => boolean),
-    type?: TEdgeType | NullEdgeType = 1,
+    type: number = 1,
   ): void {
     this._assertHasNodeId(fromNodeId);
 
@@ -237,11 +223,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   traverse<TContext>(
     visit: GraphVisitor<NodeId, TContext>,
     startNodeId: ?NodeId,
-    type:
-      | TEdgeType
-      | NullEdgeType
-      // | Array<TEdgeType | NullEdgeType>
-      | AllEdgeTypes = 1,
+    type: number | number[] = 1,
   ): ?TContext {
     const enter = typeof visit === 'function' ? visit : visit.enter;
     const traversalStartNode = nullthrows(
@@ -255,7 +237,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
         traversalStartNode,
         enter,
         typeof visit !== 'function' ? visit.exit ?? null : null,
-        Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
+        getMaybeWeight(type),
         false,
       );
     }
@@ -277,11 +259,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   traverseAncestors<TContext>(
     startNodeId: ?NodeId,
     visit: GraphVisitor<NodeId, TContext>,
-    type:
-      | TEdgeType
-      | NullEdgeType
-      // | Array<TEdgeType | NullEdgeType>
-      | AllEdgeTypes = 1,
+    type: number | number[] = 1,
   ): ?TContext {
     const traversalStartNode = nullthrows(
       startNodeId ?? this.rootNodeId,
@@ -295,7 +273,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
         traversalStartNode,
         enter,
         typeof visit !== 'function' ? visit.exit ?? null : null,
-        Array.isArray(type) ? type : type !== -1 && type != null ? [type] : [],
+        getMaybeWeight(type),
         true,
       );
     }
@@ -306,13 +284,14 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     visit: GraphTraversalCallback<NodeId, TraversalActions>,
     startNodeId: ?NodeId,
   ): void {
-    this.inner.postOrderDfs(startNodeId, visit);
+    this.inner.postOrderDfs(startNodeId ?? this.rootNodeId ?? 0, visit);
   }
 
   dfs<TContext>({
     visit,
     startNodeId,
     // TODO: getChildren is not handled in rust
+    // eslint-disable-next-line no-unused-vars
     getChildren,
   }: {|
     visit: GraphVisitor<NodeId, TContext>,

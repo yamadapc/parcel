@@ -1,15 +1,15 @@
 // @flow strict-local
 
 import assert from 'assert';
+import {setFeatureFlag} from '@parcel/feature-flags/src';
 import ContentGraph from '../src/ContentGraph';
-import {setFeatureFlags} from '@parcel/feature-flags/src';
 
 [true, false].forEach(useRustGraph => {
   beforeEach(() => {
-    setFeatureFlags({rustBackedGraph: useRustGraph});
+    setFeatureFlag('rustBackedGraph', useRustGraph);
   });
 
-  describe(`rust graph ${useRustGraph}`, () => {
+  describe(`rust graph ${String(useRustGraph)}`, () => {
     describe('ContentGraph', () => {
       it('should addNodeByContentKey if no node exists with the content key', () => {
         let graph = new ContentGraph();

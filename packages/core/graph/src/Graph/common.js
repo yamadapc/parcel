@@ -8,11 +8,19 @@ export type NullEdgeType = 1;
 
 export type GraphOpts<TNode, TEdgeType: number = 1> = {|
   nodes?: Array<TNode | null>,
+  /**
+   * Serialized rust graph
+   */
+  graph?: Buffer,
   adjacencyList?: SerializedAdjacencyList<TEdgeType>,
   rootNodeId?: ?NodeId,
 |};
 
 export type SerializedParcelGraph<TNode> = {|
+  /**
+   * Serialized rust graph
+   */
+  graph?: Buffer,
   nodes: Array<TNode | null>,
   rootNodeId: ?NodeId,
 |};

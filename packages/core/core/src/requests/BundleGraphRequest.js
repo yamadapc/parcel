@@ -405,10 +405,6 @@ class BundlerRunner {
         }),
       });
     } finally {
-      logger.verbose({
-        origin: '@parcel/core',
-        message: `Invariant internalBundleGraph!=null = ${internalBundleGraph}`,
-      });
       invariant(internalBundleGraph != null); // ensures the graph was created
       await dumpGraphToGraphViz(
         // $FlowFixMe[incompatible-call]
