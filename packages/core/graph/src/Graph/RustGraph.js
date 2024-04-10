@@ -168,14 +168,6 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     delete this.nodesById[fromNodeId(nodeId)];
   }
 
-  // TODO: do not call this on removal as it is slow; move to rust
-  cleanUp() {
-    const nodes = this.inner.getUnreachableNodes(fromNodeId(this.rootNodeId));
-    nodes.forEach(nodeId => {
-      this.removeNode(toNodeId(nodeId));
-    });
-  }
-
   removeEdges(nodeId: NodeId, type: TEdgeType | NullEdgeType = 1) {
     this.inner.removeEdges(fromNodeId(nodeId), getMaybeWeight(type));
   }
@@ -184,15 +176,14 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     from: NodeId,
     to: NodeId,
     type: number = 1,
-    // TODO: handle this?
-    // eslint-disable-next-line no-unused-vars
     removeOrphans: boolean = true,
   ) {
     this.inner.removeEdge(
       fromNodeId(from),
       fromNodeId(to),
       getMaybeWeight(type),
-      // removeOrphans,
+      removeOrphans,
+      this.rootNodeId,
     );
   }
 

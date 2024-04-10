@@ -219,20 +219,23 @@ impl ParcelGraphImpl {
   #[napi]
   pub fn remove_edge(
     &mut self,
-    from: JSNodeIndex,
-    to: JSNodeIndex,
+    js_from: JSNodeIndex,
+    js_to: JSNodeIndex,
     maybe_weight: Vec<EdgeWeight>,
-    _remove_orphans: bool,
+    remove_orphans: bool,
+    js_root_node: JSNodeIndex,
   ) -> napi::Result<()> {
-    if !self.has_edge(from, to, maybe_weight.clone()) {
+    if !self.has_edge(js_from, js_to, maybe_weight.clone()) {
       return Err(napi::Error::from_reason(format!(
-        "Edge from {from} to {to} not found!"
+        "Edge from {js_from} to {js_to} not found!"
       )));
     }
 
-    let edges = self
-      .inner
-      .edges_connecting(NodeIndex::new(from as usize), NodeIndex::new(to as usize));
+    let from = NodeIndex::new(js_from as usize);
+    let to = NodeIndex::new(js_to as usize);
+    let root_node = NodeIndex::new(js_root_node as usize);
+
+    let edges = self.inner.edges_connecting(from, to);
     let edges_to_remove: Vec<EdgeIndex> = edges
       .filter(|edge| {
         if !maybe_weight.is_empty() {
@@ -245,6 +248,15 @@ impl ParcelGraphImpl {
       .collect();
     for edge_id in edges_to_remove {
       self.inner.remove_edge(edge_id);
+    }
+
+    if remove_orphans {
+      if is_orphaned_node(&self.inner, root_node, to) {
+        self.remove_node(js_to);
+      }
+      if is_orphaned_node(&self.inner, root_node, from) {
+        self.remove_node(js_from);
+      }
     }
 
     Ok(())
