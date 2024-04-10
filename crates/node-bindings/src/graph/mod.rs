@@ -27,6 +27,7 @@ type EdgeWeight = u32;
 /// This incurs copying so it's not optimal. Ideally the nº of listed edges is not very sensitive.
 /// Ideally we will take the code that lists edges and move it across so we return less data.
 #[napi(object)]
+#[derive(Debug, PartialEq)]
 pub struct EdgeDescriptor {
   pub from: JSNodeIndex,
   pub to: JSNodeIndex,
@@ -128,25 +129,34 @@ impl ParcelGraphImpl {
   /// Ideally we would remove the node and fix the JS side to make sure it's okay with
   /// indexes changing. This is much better as otherwise the Graph never shrinks.
   #[napi]
-  pub fn remove_node(&mut self, node_index: JSNodeIndex) {
+  pub fn remove_node(&mut self, js_node_index: JSNodeIndex, js_root_node: JSNodeIndex) {
     // petgraph node removal will invalidate the last node index since it will be moved
     // to the removed node index.
     // Because of this, we will not remove the node, but instead mark it as removed.
     // self.inner.remove_node(NodeIndex::new(node_index as usize));
-    self.removed_nodes.insert(node_index.into());
+    self.removed_nodes.insert(js_node_index.into());
 
     let get_edges = |inner: &Graph<NodeWeight, EdgeWeight>, direction| {
       inner
-        .edges_directed(NodeIndex::new(node_index as usize), direction)
-        .map(|edge| edge.id())
-        .collect::<Vec<EdgeIndex>>()
+        .edges_directed(NodeIndex::new(js_node_index as usize), direction)
+        .map(|edge| (edge.id(), edge.target()))
+        .collect::<Vec<(EdgeIndex, NodeIndex)>>()
     };
-    for edge in get_edges(&self.inner, Direction::Outgoing) {
+
+    for (edge, _) in get_edges(&self.inner, Direction::Incoming) {
       self.inner.remove_edge(edge);
     }
 
-    for edge in get_edges(&self.inner, Direction::Incoming) {
+    for (edge, target) in get_edges(&self.inner, Direction::Outgoing) {
       self.inner.remove_edge(edge);
+
+      // Orphan clean-up
+      // TODO: We don't want to do this here as it's the wrong side-effect and messes-up complexity
+      let root_node = NodeIndex::new(js_root_node as usize);
+      let js_target = target.index() as u32;
+      if is_orphaned_node(&self.inner, root_node, target) {
+        self.remove_node(js_target, js_root_node);
+      }
     }
   }
 
@@ -250,12 +260,13 @@ impl ParcelGraphImpl {
       self.inner.remove_edge(edge_id);
     }
 
+    // TODO: We don't want to do this here as it's the wrong side-effect and messes-up complexity
     if remove_orphans {
       if is_orphaned_node(&self.inner, root_node, to) {
-        self.remove_node(js_to);
+        self.remove_node(js_to, js_root_node);
       }
       if is_orphaned_node(&self.inner, root_node, from) {
-        self.remove_node(js_from);
+        self.remove_node(js_from, js_root_node);
       }
     }
 
@@ -609,7 +620,7 @@ mod test {
     let idx1 = graph.inner.add_node(0);
     let idx2 = graph.inner.add_node(0);
     let idx3 = graph.inner.add_node(0);
-    graph.remove_node(idx3.index() as JSNodeIndex);
+    graph.remove_node(idx3.index() as JSNodeIndex, root.index() as JSNodeIndex);
 
     graph.inner.add_edge(root, idx1, 0);
     graph.inner.add_edge(idx1, idx2, 0);
@@ -659,11 +670,67 @@ mod test {
     let idx3 = graph.add_node(0);
     assert_eq!(graph.node_count(), 3);
 
-    graph.remove_node(idx2);
+    graph.remove_node(idx2, idx1);
     assert_eq!(graph.node_count(), 2);
     assert!(graph.has_node(idx1));
     assert!(!graph.has_node(idx2));
     assert!(graph.has_node(idx3));
+  }
+
+  #[test]
+  fn test_remove_edge_makes_edge_none() {
+    let mut graph = ParcelGraphImpl::new();
+    let idx1 = graph.add_node(0);
+    let idx2 = graph.add_node(0);
+    let _edge = graph.add_edge(idx1, idx2, 0).unwrap();
+    assert!(graph.has_edge(idx1, idx2, vec![]));
+    graph.remove_edge(idx1, idx2, vec![], true, idx1).unwrap();
+    assert!(!graph.has_edge(idx1, idx2, vec![]));
+  }
+
+  #[test]
+  fn test_removed_edge_is_not_returned_anymore() {
+    let mut graph = ParcelGraphImpl::new();
+    let idx1 = graph.add_node(0);
+    let idx2 = graph.add_node(0);
+    let _edge = graph.add_edge(idx1, idx2, 0).unwrap();
+    graph.remove_edge(idx1, idx2, vec![], true, idx1).unwrap();
+    assert!(!graph.has_edge(idx1, idx2, vec![]));
+
+    assert_eq!(graph.get_all_edges(), vec![]);
+  }
+
+  #[test]
+  fn test_remove_edge_should_prune_graph_at_that_edge() {
+    let mut graph = ParcelGraphImpl::new();
+    let root = graph.add_node(0);
+
+    let idx2 = graph.add_node(0);
+    let idx3 = graph.add_node(0);
+    let idx4 = graph.add_node(0);
+
+    graph.add_edge(root, idx2, 0).unwrap();
+    graph.add_edge(root, idx4, 0).unwrap();
+
+    graph.add_edge(idx2, idx3, 0).unwrap();
+    graph.add_edge(idx2, idx4, 0).unwrap();
+
+    graph.remove_edge(root, idx2, vec![], true, root).unwrap();
+    assert!(!graph.has_edge(idx3, idx4, vec![]));
+
+    assert!(graph.has_node(root));
+    assert!(!graph.has_node(idx2));
+    assert!(!graph.has_node(idx3));
+    assert!(graph.has_node(idx4));
+
+    assert_eq!(
+      graph.get_all_edges(),
+      vec![EdgeDescriptor {
+        from: root,
+        to: idx4,
+        weight: 0
+      }]
+    )
   }
 
   #[test]
@@ -679,7 +746,7 @@ mod test {
     let mut graph = ParcelGraphImpl::new();
     let idx = graph.add_node(0);
     assert_eq!(graph.node_count(), 1);
-    graph.remove_node(idx);
+    graph.remove_node(idx, idx);
     assert_eq!(graph.node_count(), 0);
   }
 

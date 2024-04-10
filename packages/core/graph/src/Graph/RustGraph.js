@@ -63,7 +63,9 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
    * APIs rather than listing nodes directly.
    */
   get nodes(): TNode[] {
-    const nodes = Object.keys(this.nodesById).map(Number);
+    const nodes = Object.keys(this.nodesById)
+      .map(Number)
+      .filter(key => this.hasNode(toNodeId(key)));
     nodes.sort((a, b) => a - b);
 
     return nodes.map(key => {
@@ -118,10 +120,13 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   }
 
   hasNode(id: NodeId): boolean {
-    return this.nodesById[fromNodeId(id)] != null;
+    return this.inner.hasNode(fromNodeId(id));
   }
 
   getNode(id: NodeId): ?TNode {
+    if (!this.hasNode(id)) {
+      return null;
+    }
     return this.nodesById[fromNodeId(id)];
   }
 
@@ -164,7 +169,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
 
   // Removes node and any edges coming from or to that node
   removeNode(nodeId: NodeId) {
-    this.inner.removeNode(fromNodeId(nodeId));
+    this.inner.removeNode(fromNodeId(nodeId), fromNodeId(this.rootNodeId));
     delete this.nodesById[fromNodeId(nodeId)];
   }
 

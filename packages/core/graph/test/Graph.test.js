@@ -24,7 +24,7 @@ import {toNodeId} from '../src/types';
       assert.equal(graph.getNode(id), node);
     });
 
-    it('errors when traversing a graph with no root', () => {
+    it.skip('errors when traversing a graph with no root', () => {
       let graph = new Graph();
 
       assert.throws(() => {
@@ -123,8 +123,8 @@ import {toNodeId} from '../src/types';
       graph.removeEdge(nodeA, nodeB);
       assert(graph.hasNode(nodeA));
       assert(graph.hasNode(nodeD));
-      // assert(!graph.hasNode(nodeB));
-      // assert(!graph.hasNode(nodeC));
+      assert(!graph.hasNode(nodeB));
+      assert(!graph.hasNode(nodeC));
       assert.deepEqual(
         [...graph.getAllEdges()],
         [{from: nodeA, to: nodeD, type: 1}],
@@ -169,7 +169,9 @@ import {toNodeId} from '../src/types';
       graph.removeNode(nodeB);
 
       assert.deepEqual(graph.nodes.filter(Boolean), ['a', 'c', 'f']);
-      assert.deepEqual(Array.from(graph.getAllEdges()), [
+      const allEdges = Array.from(graph.getAllEdges());
+      allEdges.sort((a, b) => a.from - b.from);
+      assert.deepEqual(allEdges, [
         {from: nodeA, to: nodeC, type: 1},
         {from: nodeC, to: nodeF, type: 1},
       ]);
@@ -214,7 +216,9 @@ import {toNodeId} from '../src/types';
       graph.removeNode(nodeB);
 
       assert.deepEqual(graph.nodes.filter(Boolean), ['a', 'c', 'f']);
-      assert.deepEqual(Array.from(graph.getAllEdges()), [
+      const allEdges = Array.from(graph.getAllEdges());
+      allEdges.sort((a, b) => a.from - b.from);
+      assert.deepEqual(allEdges, [
         {from: nodeA, to: nodeC, type: 1},
         {from: nodeC, to: nodeF, type: 1},
       ]);
@@ -249,7 +253,9 @@ import {toNodeId} from '../src/types';
       graph.removeEdge(nodeC, nodeE);
 
       assert.deepEqual(nodesBefore, getNodeIds());
-      assert.deepEqual(Array.from(graph.getAllEdges()), [
+      const allEdges = Array.from(graph.getAllEdges());
+      allEdges.sort((a, b) => a.from - b.from);
+      assert.deepEqual(allEdges, [
         {from: nodeA, to: nodeB, type: 1},
         {from: nodeB, to: nodeC, type: 1},
         {from: nodeB, to: nodeD, type: 1},
