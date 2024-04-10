@@ -25,16 +25,17 @@ import nullthrows from 'nullthrows';
  */
 export class JSGraph<TNode, TEdgeType: number = 1> {
   nodes: Array<TNode | null>;
-  adjacencyList: AdjacencyList<TEdgeType>;
   rootNodeId: ?NodeId;
-  _visited: ?BitSet;
+
+  #adjacencyList: AdjacencyList<TEdgeType>;
+  #visited: ?BitSet;
 
   constructor(opts: ?GraphOpts<TNode, TEdgeType>) {
     this.nodes = opts?.nodes || [];
     this.setRootNodeId(opts?.rootNodeId);
 
     let adjacencyList = opts?.adjacencyList;
-    this.adjacencyList = adjacencyList
+    this.#adjacencyList = adjacencyList
       ? AdjacencyList.deserialize(adjacencyList)
       : new AdjacencyList<TEdgeType>();
   }
@@ -56,7 +57,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
   serialize(): SerializedGraph<TNode, TEdgeType> {
     return {
       nodes: this.nodes,
-      adjacencyList: this.adjacencyList.serialize(),
+      adjacencyList: this.#adjacencyList.serialize(),
       rootNodeId: this.rootNodeId,
     };
   }
@@ -64,11 +65,11 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
   // Returns an iterator of all edges in the graph. This can be large, so iterating
   // the complete list can be costly in large graphs. Used when merging graphs.
   getAllEdges(): Iterator<Edge<TEdgeType | NullEdgeType>> {
-    return this.adjacencyList.getAllEdges();
+    return this.#adjacencyList.getAllEdges();
   }
 
   addNode(node: TNode): NodeId {
-    let id = this.adjacencyList.addNode();
+    let id = this.#adjacencyList.addNode();
     this.nodes.push(node);
     return id;
   }
@@ -98,7 +99,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
       throw new Error(`"to" node '${fromNodeId(to)}' not found`);
     }
 
-    return this.adjacencyList.addEdge(from, to, type);
+    return this.#adjacencyList.addEdge(from, to, type);
   }
 
   hasEdge(
@@ -106,7 +107,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     to: NodeId,
     type?: TEdgeType | NullEdgeType | Array<TEdgeType | NullEdgeType> = 1,
   ): boolean {
-    return this.adjacencyList.hasEdge(from, to, type);
+    return this.#adjacencyList.hasEdge(from, to, type);
   }
 
   getNodeIdsConnectedTo(
@@ -119,7 +120,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
   ): Array<NodeId> {
     this._assertHasNodeId(nodeId);
 
-    return this.adjacencyList.getNodeIdsConnectedTo(nodeId, type);
+    return this.#adjacencyList.getNodeIdsConnectedTo(nodeId, type);
   }
 
   getNodeIdsConnectedFrom(
@@ -132,7 +133,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
   ): Array<NodeId> {
     this._assertHasNodeId(nodeId);
 
-    return this.adjacencyList.getNodeIdsConnectedFrom(nodeId, type);
+    return this.#adjacencyList.getNodeIdsConnectedFrom(nodeId, type);
   }
 
   // Removes node and any edges coming from or to that node
@@ -141,7 +142,9 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
       return;
     }
 
-    for (let {type, from} of this.adjacencyList.getInboundEdgesByType(nodeId)) {
+    for (let {type, from} of this.#adjacencyList.getInboundEdgesByType(
+      nodeId,
+    )) {
       this._removeEdge(
         from,
         nodeId,
@@ -152,7 +155,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
       );
     }
 
-    for (let {type, to} of this.adjacencyList.getOutboundEdgesByType(nodeId)) {
+    for (let {type, to} of this.#adjacencyList.getOutboundEdgesByType(nodeId)) {
       this._removeEdge(nodeId, to, type);
     }
 
@@ -175,7 +178,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     type: TEdgeType | NullEdgeType = 1,
     removeOrphans: boolean = true,
   ) {
-    if (!this.adjacencyList.hasEdge(from, to, type)) {
+    if (!this.#adjacencyList.hasEdge(from, to, type)) {
       throw new Error(
         `Edge from ${fromNodeId(from)} to ${fromNodeId(to)} not found!`,
       );
@@ -191,11 +194,11 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     type: TEdgeType | NullEdgeType = 1,
     removeOrphans: boolean = true,
   ) {
-    if (!this.adjacencyList.hasEdge(from, to, type)) {
+    if (!this.#adjacencyList.hasEdge(from, to, type)) {
       return;
     }
 
-    this.adjacencyList.removeEdge(from, to, type);
+    this.#adjacencyList.removeEdge(from, to, type);
     if (removeOrphans && this.isOrphanedNode(to)) {
       this.removeNode(to);
     }
@@ -209,7 +212,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     if (this.rootNodeId == null) {
       // If the graph does not have a root, and there are inbound edges,
       // this node should not be considered orphaned.
-      return !this.adjacencyList.hasInboundEdges(nodeId);
+      return !this.#adjacencyList.hasInboundEdges(nodeId);
     }
 
     // Otherwise, attempt to traverse backwards to the root. If there is a path,
@@ -328,15 +331,15 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     this._assertHasNodeId(traversalStartNode);
 
     let visited;
-    if (!this._visited || this._visited.capacity < this.nodes.length) {
-      this._visited = new BitSet(this.nodes.length);
-      visited = this._visited;
+    if (!this.#visited || this.#visited.capacity < this.nodes.length) {
+      this.#visited = new BitSet(this.nodes.length);
+      visited = this.#visited;
     } else {
-      visited = this._visited;
+      visited = this.#visited;
       visited.clear();
     }
     // Take shared instance to avoid re-entrancy issues.
-    this._visited = null;
+    this.#visited = null;
 
     let stopped = false;
     let skipped = false;
@@ -367,11 +370,11 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
       }
 
       if (stopped) {
-        this._visited = visited;
+        this.#visited = visited;
         return context;
       }
 
-      this.adjacencyList.forEachNodeIdConnectedFromReverse(nodeId, child => {
+      this.#adjacencyList.forEachNodeIdConnectedFromReverse(nodeId, child => {
         if (!visited.has(child)) {
           queue.push({nodeId: child, context});
         }
@@ -379,7 +382,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
       });
     }
 
-    this._visited = visited;
+    this.#visited = visited;
     return null;
   }
 
@@ -395,14 +398,14 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     this._assertHasNodeId(traversalStartNode);
 
     let visited;
-    if (!this._visited || this._visited.capacity < this.nodes.length) {
-      this._visited = new BitSet(this.nodes.length);
-      visited = this._visited;
+    if (!this.#visited || this.#visited.capacity < this.nodes.length) {
+      this.#visited = new BitSet(this.nodes.length);
+      visited = this.#visited;
     } else {
-      visited = this._visited;
+      visited = this.#visited;
       visited.clear();
     }
-    this._visited = null;
+    this.#visited = null;
 
     let stopped = false;
     let actions: TraversalActions = {
@@ -423,7 +426,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
       if (!visited.has(nodeId)) {
         visited.add(nodeId);
 
-        this.adjacencyList.forEachNodeIdConnectedFromReverse(nodeId, child => {
+        this.#adjacencyList.forEachNodeIdConnectedFromReverse(nodeId, child => {
           if (!visited.has(child)) {
             queue.push(child);
           }
@@ -434,13 +437,13 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
         visit(nodeId, null, actions);
 
         if (stopped) {
-          this._visited = visited;
+          this.#visited = visited;
           return;
         }
       }
     }
 
-    this._visited = visited;
+    this.#visited = visited;
     return;
   }
 
@@ -460,15 +463,15 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     this._assertHasNodeId(traversalStartNode);
 
     let visited;
-    if (!this._visited || this._visited.capacity < this.nodes.length) {
-      this._visited = new BitSet(this.nodes.length);
-      visited = this._visited;
+    if (!this.#visited || this.#visited.capacity < this.nodes.length) {
+      this.#visited = new BitSet(this.nodes.length);
+      visited = this.#visited;
     } else {
-      visited = this._visited;
+      visited = this.#visited;
       visited.clear();
     }
     // Take shared instance to avoid re-entrancy issues.
-    this._visited = null;
+    this.#visited = null;
 
     let stopped = false;
     let skipped = false;
@@ -538,7 +541,7 @@ export class JSGraph<TNode, TEdgeType: number = 1> {
     };
 
     let result = walk(traversalStartNode);
-    this._visited = visited;
+    this.#visited = visited;
     return result;
   }
 
