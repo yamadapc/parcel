@@ -39,6 +39,7 @@ function getMaybeWeight(type: null | number | number[]): number[] {
  */
 export class RustGraph<TNode, TEdgeType: number = 1> {
   nodesById: {[id: number]: TNode};
+  nodes: TNode[] = [];
   inner: ParcelGraphImpl;
   rootNodeId: NodeId = toNodeId(0);
 
@@ -52,7 +53,9 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     this.inner = opts?.graph
       ? ParcelGraphImpl.deserialize(opts?.graph)
       : ParcelGraphImpl.new();
-
+    // TODO: This is copied because if we copy on read then the performance
+    // TANKS hard; something iterates over nodes all the time
+    this.nodes = this.makeNodes();
     this.setRootNodeId(opts?.rootNodeId);
   }
 
@@ -62,7 +65,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
    * Ideally this should be removed and the consumers should use higher-level
    * APIs rather than listing nodes directly.
    */
-  get nodes(): TNode[] {
+  makeNodes(): TNode[] {
     const nodes = Object.keys(this.nodesById)
       .map(Number)
       .filter(key => this.hasNode(toNodeId(key)));
@@ -104,6 +107,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   // Returns an iterator of all edges in the graph. This can be large, so iterating
   // the complete list can be costly in large graphs. Used when merging graphs.
   getAllEdges(): Array<Edge<TEdgeType>> {
+    console.log('getAllEdges');
     return this.inner.getAllEdges().map(descr => ({
       from: toNodeId(descr.from),
       to: toNodeId(descr.to),
@@ -116,6 +120,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
     let id = this.inner.addNode(0);
     // console.log('addNode', {node, id })
     this.nodesById[id] = node;
+    this.nodes.push(node);
     return toNodeId(id);
   }
 

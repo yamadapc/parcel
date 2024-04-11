@@ -15,10 +15,6 @@ export function toNodeIds(x: number[]): NodeId[] {
   return x;
 }
 
-export function fromNodeIds(x: NodeId[]): number[] {
-  return x;
-}
-
 export type ContentKey = string;
 
 export type Edge<TEdgeType: number> = {|
