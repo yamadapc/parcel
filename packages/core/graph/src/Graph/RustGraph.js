@@ -38,43 +38,18 @@ function getMaybeWeight(type: null | number | number[]): number[] {
  * Rust backed graph structure
  */
 export class RustGraph<TNode, TEdgeType: number = 1> {
-  nodesById: {[id: number]: TNode};
-  nodes: TNode[] = [];
   inner: ParcelGraphImpl;
   rootNodeId: NodeId = toNodeId(0);
 
   constructor(opts: ?GraphOpts<TNode, TEdgeType>) {
-    // this.nodes = opts?.nodes || [];
-    this.nodesById =
-      opts?.nodes?.reduce((memo, node, index) => {
-        memo[index] = node;
-        return memo;
-      }, {}) ?? {};
     this.inner = opts?.graph
       ? ParcelGraphImpl.deserialize(opts?.graph)
       : ParcelGraphImpl.new();
-    // TODO: This is copied because if we copy on read then the performance
-    // TANKS hard; something iterates over nodes all the time
-    this.nodes = this.makeNodes();
     this.setRootNodeId(opts?.rootNodeId);
   }
 
-  /**
-   * Entries iterator for backwards compatibility.
-   *
-   * Ideally this should be removed and the consumers should use higher-level
-   * APIs rather than listing nodes directly.
-   */
-  makeNodes(): TNode[] {
-    const nodes = Object.keys(this.nodesById)
-      .map(Number)
-      .filter(key => this.hasNode(toNodeId(key)));
-    nodes.sort((a, b) => a - b);
-
-    return nodes.map(key => {
-      const node = this.nodesById[key];
-      return node;
-    });
+  get nodes(): Array<TNode> {
+    return this.inner.getNodes();
   }
 
   /**
@@ -107,7 +82,6 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   // Returns an iterator of all edges in the graph. This can be large, so iterating
   // the complete list can be costly in large graphs. Used when merging graphs.
   getAllEdges(): Array<Edge<TEdgeType>> {
-    console.log('getAllEdges');
     return this.inner.getAllEdges().map(descr => ({
       from: toNodeId(descr.from),
       to: toNodeId(descr.to),
@@ -117,10 +91,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   }
 
   addNode(node: TNode): NodeId {
-    let id = this.inner.addNode(0);
-    // console.log('addNode', {node, id })
-    this.nodesById[id] = node;
-    this.nodes.push(node);
+    let id = this.inner.addNode(node);
     return toNodeId(id);
   }
 
@@ -129,10 +100,7 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   }
 
   getNode(id: NodeId): ?TNode {
-    if (!this.hasNode(id)) {
-      return null;
-    }
-    return this.nodesById[fromNodeId(id)];
+    return this.inner.getNode(fromNodeId(id));
   }
 
   addEdge(from: NodeId, to: NodeId, type: number = 1): boolean {
@@ -175,7 +143,6 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
   // Removes node and any edges coming from or to that node
   removeNode(nodeId: NodeId) {
     this.inner.removeNode(fromNodeId(nodeId), fromNodeId(this.rootNodeId));
-    delete this.nodesById[fromNodeId(nodeId)];
   }
 
   removeEdges(nodeId: NodeId, type: TEdgeType | NullEdgeType = 1) {
@@ -206,7 +173,8 @@ export class RustGraph<TNode, TEdgeType: number = 1> {
 
   updateNode(nodeId: NodeId, node: TNode): void {
     this._assertHasNodeId(nodeId);
-    this.nodesById[fromNodeId(nodeId)] = node;
+    // TODO: we might not want to do this
+    this.nodes[Number(nodeId)] = node;
   }
 
   // Update a node's downstream nodes making sure to prune any orphaned branches

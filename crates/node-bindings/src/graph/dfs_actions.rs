@@ -35,7 +35,7 @@ impl DFSActions {
 
   /// Return true if visitors have called the skip hook.
   ///
-  /// The DFS should skip a sub-tree on this case. This will be reset by set_skipped.
+  /// The DFS should skip a subtree on this case. This will be reset by set_skipped.
   pub fn is_skipped(&self) -> bool {
     self.skipped.load(Ordering::Relaxed)
   }
