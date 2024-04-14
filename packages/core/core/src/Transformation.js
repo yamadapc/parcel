@@ -8,6 +8,7 @@ import type {
   PackageName,
   ResolveOptions,
   SemverRange,
+  DependencySpecifier,
 } from '@parcel/types';
 import type {WorkerApi} from '@parcel/workers';
 import type {
@@ -89,6 +90,11 @@ export type TransformationResult = {|
   error?: Array<Diagnostic>,
   configRequests: Array<ConfigRequest>,
   invalidations: Invalidations,
+  /**
+   * Either a DevDepRequest object or a partial `DevDepRequestReference` in case
+   * this request has previously been copied from a worker thread to the main
+   * thread.
+   */
   devDepRequests: Array<DevDepRequest>,
 |};
 

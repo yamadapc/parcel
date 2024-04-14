@@ -253,19 +253,28 @@ export type Invalidations = {|
   invalidateOnBuild: boolean,
 |};
 
-export type DevDepRequest = {|
+export type DevDepRequestReference = {|
+  type: 'reference',
   specifier: DependencySpecifier,
   resolveFrom: ProjectPath,
   hash: string,
-  invalidateOnFileCreate?: Array<InternalFileCreateInvalidation>,
-  invalidateOnFileChange?: Set<ProjectPath>,
-  invalidateOnStartup?: boolean,
+|};
+
+export type DevDepRequestFull = {|
+  specifier: DependencySpecifier,
+  resolveFrom: ProjectPath,
+  hash: string,
+  invalidateOnFileCreate: Array<InternalFileCreateInvalidation>,
+  invalidateOnFileChange: Set<ProjectPath>,
+  invalidateOnStartup: boolean,
   additionalInvalidations?: Array<{|
     specifier: DependencySpecifier,
     resolveFrom: ProjectPath,
     range?: ?SemverRange,
   |}>,
 |};
+
+export type DevDepRequest = DevDepRequestReference | DevDepRequestFull;
 
 declare type GlobPattern = string;
 

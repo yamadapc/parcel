@@ -13,7 +13,11 @@ import type {ConfigAndCachePath} from './ParcelConfigRequest';
 
 import nullthrows from 'nullthrows';
 import {runConfigRequest} from './ConfigRequest';
-import {getDevDepRequests, runDevDepRequest} from './DevDepRequest';
+import {
+  getDevDepRequests,
+  resolveDevDepRequest,
+  runDevDepRequest,
+} from './DevDepRequest';
 import createParcelConfigRequest from './ParcelConfigRequest';
 
 type PackageRequestInput = {|

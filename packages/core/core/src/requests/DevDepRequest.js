@@ -3,22 +3,23 @@ import type {DependencySpecifier, SemverRange} from '@parcel/types';
 import type ParcelConfig from '../ParcelConfig';
 import type {
   DevDepRequest,
-  ParcelOptions,
+  DevDepRequestFull,
   InternalDevDepOptions,
+  ParcelOptions,
 } from '../types';
 import type {RunAPI} from '../RequestTracker';
+import {requestTypes} from '../RequestTracker';
 import type {ProjectPath} from '../projectPath';
-
-import nullthrows from 'nullthrows';
-import {getInvalidationHash} from '../assetUtils';
-import {createBuildCache} from '../buildCache';
-import {invalidateOnFileCreateToInternal} from '../utils';
 import {
   fromProjectPath,
   fromProjectPathRelative,
   toProjectPath,
 } from '../projectPath';
-import {requestTypes} from '../RequestTracker';
+
+import nullthrows from 'nullthrows';
+import {getInvalidationHash} from '../assetUtils';
+import {createBuildCache} from '../buildCache';
+import {invalidateOnFileCreateToInternal} from '../utils';
 
 // A cache of dev dep requests keyed by invalidations.
 // If the package manager returns the same invalidation object, then
@@ -40,6 +41,7 @@ export async function createDevDependency(
   let hash = requestDevDeps.get(key);
   if (hash != null) {
     return {
+      type: 'reference',
       specifier,
       resolveFrom,
       hash,
@@ -183,30 +185,35 @@ type DevDepRequestResult = {|
   |}>,
 |};
 
+export function getDevDepRequestId(devDepRequest: {
+  specifier: DependencySpecifier,
+  hash: string,
+  ...
+}): string {
+  return (
+    'dev_dep_request:' + devDepRequest.specifier + ':' + devDepRequest.hash
+  );
+}
+
 export async function runDevDepRequest<TResult>(
   api: RunAPI<TResult>,
-  devDepRequest: DevDepRequest,
+  partialDevDepRequest: DevDepRequest,
 ) {
   await api.runRequest<null, DevDepRequestResult | void>({
-    id: 'dev_dep_request:' + devDepRequest.specifier + ':' + devDepRequest.hash,
+    id: getDevDepRequestId(partialDevDepRequest),
     type: requestTypes.dev_dep_request,
     incompleteRequest: !(
-      devDepRequest.invalidateOnFileChange &&
-      devDepRequest.invalidateOnFileCreate
+      partialDevDepRequest.invalidateOnFileChange &&
+      partialDevDepRequest.invalidateOnFileCreate
     ),
     run: ({api}) => {
-      for (let filePath of nullthrows(
-        devDepRequest.invalidateOnFileChange,
-        'DevDepRequest missing invalidateOnFileChange',
-      )) {
+      const devDepRequest = resolveDevDepRequest(partialDevDepRequest);
+      for (let filePath of devDepRequest.invalidateOnFileChange) {
         api.invalidateOnFileUpdate(filePath);
         api.invalidateOnFileDelete(filePath);
       }
 
-      for (let invalidation of nullthrows(
-        devDepRequest.invalidateOnFileCreate,
-        'DevDepRequest missing invalidateOnFileCreate',
-      )) {
+      for (let invalidation of devDepRequest.invalidateOnFileCreate) {
         api.invalidateOnFileCreate(invalidation);
       }
 
@@ -229,6 +236,10 @@ export async function runDevDepRequest<TResult>(
 // Automatically cleared before each build.
 const pluginCache = createBuildCache();
 
+/**
+ * Converting the requests into RequestResults to avoid copying some of the
+ * fields between workers threads
+ */
 export function getWorkerDevDepRequests(
   devDepRequests: Array<DevDepRequest>,
 ): Array<DevDepRequest> {
@@ -237,10 +248,46 @@ export function getWorkerDevDepRequests(
     // there's no need to repeat ourselves.
     let {specifier, resolveFrom, hash} = devDepRequest;
     if (hash === pluginCache.get(specifier)) {
-      return {specifier, resolveFrom, hash};
+      return {
+        type: 'reference',
+        specifier,
+        resolveFrom,
+        hash,
+      };
     } else {
       pluginCache.set(specifier, hash);
       return devDepRequest;
     }
   });
+}
+
+/**
+ * This will be cleared on clearConfigCache calls and the worker caches used to
+ * determine whether to send references will be cleared first before this is
+ * cleared.
+ */
+const DEV_DEP_REQUESTS: Map<string, DevDepRequestFull> = createBuildCache();
+
+/**
+ * Resolve DevDepRequestReferences into DevDepRequests
+ */
+export function resolveDevDepRequest(
+  devDepRequest: DevDepRequest,
+): DevDepRequestFull {
+  if (devDepRequest.type !== 'reference') {
+    // If we got a full request, then we store it & return it
+    DEV_DEP_REQUESTS.set(getDevDepRequestId(devDepRequest), devDepRequest);
+    return devDepRequest;
+  } else {
+    // If we got a partial request, then we will try to get it from cache
+    // otherwise fail
+    const id = getDevDepRequestId(devDepRequest);
+    const devDepRequestFull: DevDepRequestFull | void =
+      DEV_DEP_REQUESTS.get(id);
+    if (devDepRequestFull) {
+      return devDepRequestFull;
+    } else {
+      throw new Error(`IMPOSSIBLE: DevDepRequest with id ${id} not found`);
+    }
+  }
 }

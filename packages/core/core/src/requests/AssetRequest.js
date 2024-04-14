@@ -3,6 +3,7 @@
 import type {ContentKey} from '@parcel/graph';
 import type {Async} from '@parcel/types';
 import type {StaticRunOpts} from '../RequestTracker';
+import {requestTypes} from '../RequestTracker';
 import type {
   AssetRequestInput,
   AssetRequestResult,
@@ -10,17 +11,16 @@ import type {
   TransformationRequest,
 } from '../types';
 import type {ConfigAndCachePath} from './ParcelConfigRequest';
+import createParcelConfigRequest from './ParcelConfigRequest';
 import type {TransformationResult} from '../Transformation';
 
 import nullthrows from 'nullthrows';
 import ThrowableDiagnostic from '@parcel/diagnostic';
 import {hashString} from '@parcel/rust';
-import createParcelConfigRequest from './ParcelConfigRequest';
-import {runDevDepRequest} from './DevDepRequest';
+import {resolveDevDepRequest, runDevDepRequest} from './DevDepRequest';
 import {runConfigRequest} from './ConfigRequest';
 import {fromProjectPath, fromProjectPathRelative} from '../projectPath';
 import {report} from '../ReporterRunner';
-import {requestTypes} from '../RequestTracker';
 
 type RunInput<TResult> = {|
   input: AssetRequestInput,

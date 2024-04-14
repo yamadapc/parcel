@@ -166,7 +166,7 @@ export default class PackagerRunner {
     return {
       bundleInfo,
       configRequests,
-      devDepRequests,
+      devDepRequests: devDepRequests,
       invalidations: [...this.invalidations.values()],
     };
   }
