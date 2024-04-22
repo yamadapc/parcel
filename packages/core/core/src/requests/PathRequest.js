@@ -104,12 +104,12 @@ async function run({input, api, options}) {
   const start = performance.now();
   let result: ResolverResult = await resolverRunner.resolve(input.dependency);
   const end = performance.now();
-  logger.verbose({
-    origin: '@parcel/core',
-    message: `FINISHED Resolved ${input.dependency.id} in ${Math.floor(
-      end - start,
-    )}ms`,
-  });
+  // logger.verbose({
+  //   origin: '@parcel/core',
+  //   message: `FINISHED Resolved ${input.dependency.id} in ${Math.floor(
+  //     end - start,
+  //   )}ms`,
+  // });
 
   if (result.invalidateOnEnvChange) {
     for (let env of result.invalidateOnEnvChange) {

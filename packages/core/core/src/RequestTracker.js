@@ -1173,10 +1173,10 @@ export default class RequestTracker {
   ): Promise<TResult> {
     const start = performance.now();
     const logId = `${requestTypeToLabel[request.type]}/${request.id}`;
-    logger.verbose({
-      origin: '@parcel/core',
-      message: `RequestGraph::runRequest(${logId}) nodes=${this.graph.nodes.length}`,
-    });
+    // logger.verbose({
+    //   origin: '@parcel/core',
+    //   message: `RequestGraph::runRequest(${logId}) nodes=${this.graph.nodes.length}`,
+    // });
 
     let requestId = this.graph.hasContentKey(request.id)
       ? this.graph.getNodeIdByContentKey(request.id)
@@ -1233,12 +1233,12 @@ export default class RequestTracker {
       deferred.resolve(true);
 
       const end = performance.now();
-      logger.verbose({
-        origin: '@parcel/core',
-        message: `FINISHED RequestGraph::runRequest(${logId}) - ${Math.floor(
-          end - start,
-        )}ms`,
-      });
+      // logger.verbose({
+      //   origin: '@parcel/core',
+      //   message: `FINISHED RequestGraph::runRequest(${logId}) - ${Math.floor(
+      //     end - start,
+      //   )}ms`,
+      // });
 
       return result;
     } catch (err) {

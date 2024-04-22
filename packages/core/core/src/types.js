@@ -253,6 +253,9 @@ export type Invalidations = {|
   invalidateOnBuild: boolean,
 |};
 
+/**
+ *
+ */
 export type DevDepRequest = {|
   specifier: DependencySpecifier,
   resolveFrom: ProjectPath,

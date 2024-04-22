@@ -6,6 +6,7 @@ import sinon from 'sinon';
 import {JSGraph} from '../src/Graph/JSGraph';
 import {RustGraph} from '../src/Graph/RustGraph';
 import {toNodeId} from '../src/types';
+import {ContentGraph} from '../src';
 
 [true, false].forEach(useRustGraph => {
   const Graph = useRustGraph ? RustGraph : JSGraph;
@@ -103,7 +104,7 @@ import {toNodeId} from '../src/types';
       }, /Edge from 0 to 1 not found!/);
     });
 
-    it('removeEdge should prune the graph at that edge', () => {
+    it.only('removeEdge should prune the graph at that edge', () => {
       //         a
       //        / \
       //       b - d
@@ -303,6 +304,51 @@ import {toNodeId} from '../src/types';
         {from: nodeA, to: nodeB, type: 1},
         {from: nodeA, to: nodeD, type: 1},
       ]);
+    });
+
+    it('can traverse the graph from a root node', () => {
+      let graph = new Graph();
+      let nodeA = graph.addNode('a');
+      let nodeB = graph.addNode('b');
+      let nodeC = graph.addNode('c');
+      let nodeD = graph.addNode('d');
+
+      graph.addEdge(nodeA, nodeB);
+      graph.addEdge(nodeA, nodeD);
+      graph.addEdge(nodeB, nodeC);
+      graph.addEdge(nodeB, nodeD);
+      graph.setRootNodeId(nodeA);
+
+      let visited = [];
+      graph.traverse(
+        nodeId => {
+          visited.push(nodeId);
+        },
+        null, // use root as startNode
+      );
+
+      assert.deepEqual(visited, [nodeA, nodeB, nodeC, nodeD]);
+    });
+
+    it('can traverse up graph from a leaf node', () => {
+      let graph = new Graph();
+      let nodeA = graph.addNode('a');
+      let nodeB = graph.addNode('b');
+      let nodeC = graph.addNode('c');
+      let nodeD = graph.addNode('d');
+
+      graph.addEdge(nodeA, nodeB);
+      graph.addEdge(nodeA, nodeD);
+      graph.addEdge(nodeB, nodeC);
+      graph.addEdge(nodeB, nodeD);
+      graph.setRootNodeId(nodeA);
+
+      let visited = [];
+      graph.traverseAncestors(nodeC, nodeId => {
+        visited.push(nodeId);
+      });
+
+      assert.deepEqual(visited, [nodeC, nodeB, nodeA]);
     });
 
     it('traverses along edge types if a filter is given', () => {

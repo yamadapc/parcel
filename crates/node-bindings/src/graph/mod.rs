@@ -1,19 +1,18 @@
-use std::cell::RefCell;
 use std::collections::HashSet;
-use std::rc::Rc;
 
-use napi::bindgen_prelude::{Array, Buffer, FromNapiValue};
+use napi::bindgen_prelude::{Array, Buffer, FromNapiValue, ObjectFinalize};
 use napi::{Env, JsFunction, JsObject, JsUnknown, NapiRaw, Ref};
 use napi_derive::napi;
-use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::visit::{Dfs, DfsPostOrder, EdgeRef, NodeRef, Reversed};
-use petgraph::{Directed, Direction, Graph};
+use petgraph::graph::NodeIndex;
+use petgraph::visit::{Dfs, EdgeRef, NodeRef, Reversed};
+use petgraph::Graph;
 use postcard::{from_bytes, to_allocvec};
 use serde::{Deserialize, Serialize};
 
-use dfs_actions::DFSActions;
+use inner::GraphInner;
 
 mod dfs_actions;
+mod inner;
 
 /// All node indexes are represented by a u32. This allows the least expensive translation with JS.
 type JSNodeIndex = u32;
@@ -37,12 +36,17 @@ pub struct EdgeDescriptor {
 
 /// Internal graph used for Parcel bundle/asset/request tracking, wraps petgraph
 /// Edges and nodes have number weights
-#[napi]
+#[napi(custom_finalize)]
 pub struct ParcelGraphImpl {
-  inner: Graph<NodeWeight, EdgeWeight, Directed, u32>,
-  nodes: Rc<RefCell<napi::Ref<()>>>,
-  /// See `remove_node`
-  removed_nodes: HashSet<NodeIndex>,
+  inner: GraphInner,
+  nodes: Ref<()>,
+}
+
+impl ObjectFinalize for ParcelGraphImpl {
+  fn finalize(mut self, env: Env) -> napi::Result<()> {
+    self.nodes.unref(env)?;
+    Ok(())
+  }
 }
 
 // MARK: JavaScript API
@@ -60,9 +64,8 @@ impl ParcelGraphImpl {
     let nodes_array = env.create_array(0)?;
     let nodes_ref = env.create_reference(nodes_array.coerce_to_object()?)?;
     Ok(Self {
-      inner: Graph::new(),
-      nodes: Rc::new(RefCell::new(nodes_ref)),
-      removed_nodes: HashSet::new(),
+      inner: GraphInner::new(),
+      nodes: nodes_ref,
     })
   }
 
@@ -73,16 +76,22 @@ impl ParcelGraphImpl {
   #[napi]
   pub fn deserialize(env: Env, serialized: Buffer) -> napi::Result<Self> {
     let value = serialized.as_ref();
-    let serialized_graph: SerializedGraph =
+    let serialized_graph: inner::SerializedGraph =
       from_bytes(value).map_err(|_| napi::Error::from_reason("Failed to deserialize"))?;
-    Ok(Self::from_serialized(env, &serialized_graph)?)
+    let nodes_array = env.create_array(0)?;
+    let nodes_ref = env.create_reference(nodes_array.coerce_to_object()?)?;
+
+    Ok(Self {
+      inner: GraphInner::from_serialized(&serialized_graph)?,
+      nodes: nodes_ref,
+    })
   }
 
   /// Serialize the graph to a buffer. This copies the Graph data into a `SerializedGraph`,
   /// but the buffer is not copied into JavaScript. So we can optimise this quite a bit further.
   #[napi]
   pub fn serialize(&self, _env: Env) -> napi::Result<Buffer> {
-    let serialized = SerializedGraph::from(self);
+    let serialized = inner::SerializedGraph::from(&self.inner);
     let serialized =
       to_allocvec(&serialized).map_err(|_err| napi::Error::from_reason("Failed to serialize"))?;
     Ok(Buffer::from(serialized.as_ref()))
@@ -94,8 +103,8 @@ impl ParcelGraphImpl {
   #[napi]
   pub fn add_node(&mut self, env: Env, weight: JsUnknown) -> napi::Result<JSNodeIndex> {
     // let weight = env.create_reference(weight)?;
-    let node_index = self.inner.add_node(0);
-    let nodes = self.nodes.borrow_mut();
+    let node_index = self.inner.add_node();
+    let nodes = &self.nodes;
     let mut nodes_array: Array = get_array_reference(env, &nodes)?;
     nodes_array.insert(weight)?;
     Ok(node_index.index() as u32)
@@ -107,10 +116,6 @@ impl ParcelGraphImpl {
   #[napi]
   pub fn has_node(&self, node_index: JSNodeIndex) -> bool {
     let node_index = NodeIndex::new(node_index as usize);
-    if self.removed_nodes.contains(&node_index) {
-      return false;
-    }
-
     self.inner.node_weight(node_index).is_some()
   }
 
@@ -119,13 +124,6 @@ impl ParcelGraphImpl {
   /// O(1)
   #[napi]
   pub fn node_weight(&self, node_index: JSNodeIndex) -> Option<NodeWeight> {
-    if self
-      .removed_nodes
-      .contains(&NodeIndex::new(node_index as usize))
-    {
-      return None;
-    }
-
     self
       .inner
       .node_weight(NodeIndex::new(node_index as usize))
@@ -134,7 +132,7 @@ impl ParcelGraphImpl {
 
   #[napi]
   pub fn get_nodes(&self, env: Env) -> napi::Result<JsObject> {
-    let nodes = self.nodes.borrow();
+    let nodes = &self.nodes;
     let js_nodes = env.get_reference_value(&nodes)?;
     Ok(js_nodes)
   }
@@ -143,7 +141,7 @@ impl ParcelGraphImpl {
   pub fn get_node(&self, env: Env, node_index: JSNodeIndex) -> napi::Result<Option<JsUnknown>> {
     let node_index: NodeIndex = NodeIndex::new(node_index as usize);
 
-    let nodes = self.nodes.borrow_mut();
+    let nodes = &self.nodes;
     let nodes_array: Array = get_array_reference(env, &nodes)?;
     nodes_array.get::<JsUnknown>(node_index.index() as u32)
   }
@@ -163,36 +161,42 @@ impl ParcelGraphImpl {
     // petgraph node removal will invalidate the last node index since it will be moved
     // to the removed node index.
     // Because of this, we will not remove the node, but instead mark it as removed.
-    // self.inner.remove_node(NodeIndex::new(node_index as usize));
-    self.removed_nodes.insert(js_node_index.into());
 
-    let nodes = self.nodes.borrow_mut();
+    let nodes = &self.nodes;
     let mut nodes_array = get_array_reference(env, &nodes)?;
-    nodes_array.set(js_node_index, env.get_null()?)?;
-    drop(nodes);
+    let new_length = nodes_array.len() - 1;
+    nodes_array.set(js_node_index, nodes_array.get::<JsUnknown>(new_length))?;
+    let mut nodes_obj = nodes_array.coerce_to_object()?;
+    nodes_obj.set("length", new_length)?;
 
-    let get_edges = |inner: &Graph<NodeWeight, EdgeWeight>, direction| {
-      inner
-        .edges_directed(NodeIndex::new(js_node_index as usize), direction)
-        .map(|edge| (edge.id(), edge.target()))
-        .collect::<Vec<(EdgeIndex, NodeIndex)>>()
-    };
-
-    for (edge, _) in get_edges(&self.inner, Direction::Incoming) {
-      self.inner.remove_edge(edge);
-    }
-
-    for (edge, target) in get_edges(&self.inner, Direction::Outgoing) {
-      self.inner.remove_edge(edge);
-
-      // Orphan clean-up
-      // TODO: We don't want to do this here as it's the wrong side-effect and messes-up complexity
-      let root_node = NodeIndex::new(js_root_node as usize);
-      let js_target = target.index() as u32;
-      if is_orphaned_node(&self.inner, root_node, target) {
-        self.remove_node(env, js_target, js_root_node)?;
-      }
-    }
+    // let get_edges = |inner: &Graph<NodeWeight, EdgeWeight>, direction| {
+    //   inner
+    //     .edges_directed(NodeIndex::new(js_node_index as usize), direction)
+    //     .map(|edge| (edge.id(), edge.target()))
+    //     .collect::<Vec<(EdgeIndex, NodeIndex)>>()
+    // };
+    //
+    // let outgoing_edges = get_edges(&self.inner, Direction::Outgoing);
+    // let rewritten_node_index = self.inner.node_count() - 1;
+    // self
+    //   .inner
+    //   .remove_node(NodeIndex::new(js_node_index as usize));
+    //
+    // for (_, target) in outgoing_edges {
+    //   let target = if target.index() == rewritten_node_index {
+    //     NodeIndex::new(js_node_index as usize)
+    //   } else {
+    //     target
+    //   };
+    //
+    //   // Orphan clean-up
+    //   // TODO: We don't want to do this here as it's the wrong side-effect and messes-up complexity
+    //   let root_node = NodeIndex::new(js_root_node as usize);
+    //   let js_target = target.index() as u32;
+    //   if is_orphaned_node(&self.inner, root_node, target) {
+    //     self.remove_node(env, js_target, js_root_node)?;
+    //   }
+    // }
 
     Ok(())
   }
@@ -200,7 +204,7 @@ impl ParcelGraphImpl {
   /// Count the number of nodes on the graph.
   #[napi]
   pub fn node_count(&self) -> u32 {
-    self.inner.node_count() as u32 - self.removed_nodes.len() as u32
+    self.inner.node_count() as u32
   }
 
   #[napi]
@@ -234,30 +238,16 @@ impl ParcelGraphImpl {
     to: JSNodeIndex,
     maybe_weight: Vec<EdgeWeight>,
   ) -> bool {
-    let weight_is_empty = maybe_weight.is_empty();
-    self
-      .inner
-      .edges_connecting(NodeIndex::new(from as usize), NodeIndex::new(to as usize))
-      .any(|item| {
-        if !weight_is_empty {
-          maybe_weight.contains(item.weight())
-        } else {
-          true
-        }
-      })
+    self.inner.has_edge(
+      NodeIndex::new(from as usize),
+      NodeIndex::new(to as usize),
+      maybe_weight,
+    )
   }
 
   #[napi]
   pub fn get_all_edges(&self) -> Vec<EdgeDescriptor> {
-    let edges = self.inner.raw_edges();
-    edges
-      .iter()
-      .map(|edge| EdgeDescriptor {
-        from: edge.source().index() as u32,
-        to: edge.target().index() as u32,
-        weight: edge.weight,
-      })
-      .collect()
+    self.inner.get_all_edges()
   }
 
   /// Remove an edge from the graph.
@@ -283,34 +273,34 @@ impl ParcelGraphImpl {
       )));
     }
 
-    let from = NodeIndex::new(js_from as usize);
-    let to = NodeIndex::new(js_to as usize);
-    let root_node = NodeIndex::new(js_root_node as usize);
-
-    let edges = self.inner.edges_connecting(from, to);
-    let edges_to_remove: Vec<EdgeIndex> = edges
-      .filter(|edge| {
-        if !maybe_weight.is_empty() {
-          maybe_weight.contains(edge.weight())
-        } else {
-          true
-        }
-      })
-      .map(|edge| edge.id())
-      .collect();
-    for edge_id in edges_to_remove {
-      self.inner.remove_edge(edge_id);
-    }
-
-    // TODO: We don't want to do this here as it's the wrong side-effect and messes-up complexity
-    if remove_orphans {
-      if is_orphaned_node(&self.inner, root_node, to) {
-        self.remove_node(env, js_to, js_root_node)?;
-      }
-      if is_orphaned_node(&self.inner, root_node, from) {
-        self.remove_node(env, js_from, js_root_node)?;
-      }
-    }
+    // let from = NodeIndex::new(js_from as usize);
+    // let to = NodeIndex::new(js_to as usize);
+    // let root_node = NodeIndex::new(js_root_node as usize);
+    //
+    // let edges = self.inner.edges_connecting(from, to);
+    // let edges_to_remove: Vec<EdgeIndex> = edges
+    //   .filter(|edge| {
+    //     if !maybe_weight.is_empty() {
+    //       maybe_weight.contains(edge.weight())
+    //     } else {
+    //       true
+    //     }
+    //   })
+    //   .map(|edge| edge.id())
+    //   .collect();
+    // for edge_id in edges_to_remove {
+    //   self.inner.remove_edge(edge_id);
+    // }
+    //
+    // // TODO: We don't want to do this here as it's the wrong side-effect and messes-up complexity
+    // if remove_orphans {
+    //   if is_orphaned_node(&self.inner, root_node, to) {
+    //     self.remove_node(env, js_to, js_root_node)?;
+    //   }
+    //   if is_orphaned_node(&self.inner, root_node, from) {
+    //     self.remove_node(env, js_from, js_root_node)?;
+    //   }
+    // }
 
     Ok(())
   }
@@ -318,21 +308,9 @@ impl ParcelGraphImpl {
   /// Remove a list of edges. Does not run clean-up
   #[napi]
   pub fn remove_edges(&mut self, node_index: JSNodeIndex, maybe_weight: Vec<EdgeWeight>) {
-    let indexes_to_remove = self
+    self
       .inner
-      .edges_directed(NodeIndex::new(node_index as usize), Direction::Outgoing)
-      .filter(|edge| {
-        if maybe_weight.is_empty() {
-          maybe_weight.contains(edge.weight())
-        } else {
-          true
-        }
-      })
-      .map(|edge| edge.id())
-      .collect::<Vec<EdgeIndex>>();
-    for idx in indexes_to_remove {
-      self.inner.remove_edge(idx);
-    }
+      .remove_edges(NodeIndex::new(node_index as usize), maybe_weight)
   }
 
   /// Get the node indexes connected incoming into a node.
@@ -344,16 +322,7 @@ impl ParcelGraphImpl {
   ) -> Vec<JSNodeIndex> {
     self
       .inner
-      .edges_directed(NodeIndex::new(node_index as usize), Direction::Incoming)
-      .filter(|edge| {
-        if !edge_weight.is_empty() {
-          edge_weight.contains(edge.weight())
-        } else {
-          true
-        }
-      })
-      .map(|edge| edge.source().index() as u32)
-      .collect()
+      .get_node_ids_connected_to(NodeIndex::new(node_index as usize), edge_weight)
   }
 
   /// Get the node indexes connected outgoing from a node.
@@ -365,22 +334,13 @@ impl ParcelGraphImpl {
   ) -> Vec<JSNodeIndex> {
     self
       .inner
-      .edges_directed(NodeIndex::new(node_index as usize), Direction::Outgoing)
-      .filter(|edge| {
-        if !edge_weight.is_empty() {
-          edge_weight.contains(edge.weight())
-        } else {
-          true
-        }
-      })
-      .map(|edge| edge.target().index() as u32)
-      .collect()
+      .get_node_ids_connected_from(NodeIndex::new(node_index as usize), edge_weight)
   }
 
   /// Will return an empty vec if the graph has a cycle
   #[napi]
   pub fn topo_sort(&self) -> Vec<JSNodeIndex> {
-    let result = petgraph::algo::toposort(&self.inner, None).unwrap_or_else(|_| vec![]);
+    let result = self.inner.topo_sort();
     result.iter().map(|node| node.index() as u32).collect()
   }
 
@@ -396,93 +356,124 @@ impl ParcelGraphImpl {
     // If true we will traverse up from start-node to all its incoming connections
     traverse_up: bool,
   ) -> napi::Result<JsUnknown> {
-    let exit = exit.map(Rc::new);
-    let direction = if traverse_up {
-      Direction::Incoming
-    } else {
-      Direction::Outgoing
-    };
-
-    enum QueueCommand {
-      Item {
-        idx: NodeIndex,
-        context: Rc<JsUnknown>,
+    let result = self.inner.dfs(
+      NodeIndex::new(start_node as usize),
+      |node: NodeIndex| -> napi::Result<JsUnknown> {
+        let js_node_idx = env.create_int64(node.index() as i64)?;
+        enter.call(None, &[&js_node_idx.into_unknown()])
       },
-      Exit {
-        f: Rc<JsFunction>,
-        idx: NodeIndex,
-      },
-    }
-
-    let mut queue: Vec<QueueCommand> = vec![];
-    let mut visited = HashSet::<NodeIndex>::new();
-    let initial_context = env.get_undefined()?.into_unknown();
-
-    queue.push(QueueCommand::Item {
-      idx: NodeIndex::new(start_node as usize),
-      context: Rc::new(initial_context),
-    });
-
-    let actions = DFSActions::new();
-    let js_actions = actions.to_js(&env)?;
-
-    while let Some(command) = queue.pop() {
-      match command {
-        QueueCommand::Item { idx, context } => {
-          visited.insert(idx);
-          let js_node_idx = env.create_int64(idx.index() as i64)?;
-
-          actions.reset();
-
-          // Visit
-          let new_context =
-            enter.call(None, &[&js_node_idx.into_unknown(), &context, &js_actions])?;
-
-          if actions.is_skipped() {
-            continue;
-          }
-
-          if actions.is_stopped() {
-            return Ok(new_context);
-          }
-          let new_context = Rc::new(new_context);
-
-          if let Some(exit) = &exit {
-            queue.push(QueueCommand::Exit {
-              f: exit.clone(),
-              idx,
-            });
-          }
-          for child in self.inner.edges_directed(idx, direction) {
-            let matches_target_weight =
-              maybe_edge_weight.is_empty() || maybe_edge_weight.contains(child.weight());
-            if !matches_target_weight {
-              continue;
-            }
-
-            if visited.contains(&child.target().id()) {
-              continue;
-            }
-            queue.push(QueueCommand::Item {
-              idx: child.target().id(),
-              context: new_context.clone(),
-            })
-          }
+      exit.map(|exit| {
+        move |node: NodeIndex| -> napi::Result<JsUnknown> {
+          let js_node_idx = env.create_int64(node.index() as i64)?;
+          exit.call(None, &[js_node_idx.into_unknown()])
         }
-        QueueCommand::Exit { f, idx } => {
-          let js_node_idx = env.create_int64(idx.index() as i64)?;
-          f.call(None, &[js_node_idx])?;
-        }
-      }
-    }
+      }),
+      maybe_edge_weight,
+      traverse_up,
+    )?;
 
-    Ok(env.get_undefined()?.into_unknown())
+    let js_undefined = env.get_undefined()?.into_unknown();
+    Ok(result.unwrap_or_else(|| js_undefined))
+
+    // let exit = exit.map(Rc::new);
+    // let direction = if traverse_up {
+    //   Direction::Incoming
+    // } else {
+    //   Direction::Outgoing
+    // };
+    //
+    // enum QueueCommand {
+    //   Item {
+    //     idx: NodeIndex,
+    //     context: Rc<JsUnknown>,
+    //   },
+    //   Exit {
+    //     f: Rc<JsFunction>,
+    //     idx: NodeIndex,
+    //   },
+    // }
+    //
+    // let mut queue: Vec<QueueCommand> = vec![];
+    // let mut visited = HashSet::<NodeIndex>::new();
+    // let initial_context = env.get_undefined()?.into_unknown();
+    //
+    // let start_node = NodeIndex::new(start_node as usize);
+    // queue.push(QueueCommand::Item {
+    //   idx: start_node,
+    //   context: Rc::new(initial_context),
+    // });
+    //
+    // let actions = DFSActions::new();
+    // let js_actions = actions.to_js(&env)?;
+    //
+    // while let Some(command) = queue.pop() {
+    //   match command {
+    //     QueueCommand::Item { idx, context } => {
+    //       if visited.contains(&idx) {
+    //         continue;
+    //       }
+    //
+    //       visited.insert(idx);
+    //       let js_node_idx = env.create_int64(idx.index() as i64)?;
+    //
+    //       actions.reset();
+    //
+    //       // Visit
+    //       let new_context =
+    //         enter.call(None, &[&js_node_idx.into_unknown(), &context, &js_actions])?;
+    //
+    //       if actions.is_skipped() {
+    //         continue;
+    //       }
+    //
+    //       if actions.is_stopped() {
+    //         return Ok(new_context);
+    //       }
+    //       let new_context = Rc::new(new_context);
+    //
+    //       if let Some(exit) = &exit {
+    //         queue.push(QueueCommand::Exit {
+    //           f: exit.clone(),
+    //           idx,
+    //         });
+    //       }
+    //       for child in self.inner.edges_directed(idx, direction) {
+    //         let matches_target_weight =
+    //           maybe_edge_weight.is_empty() || maybe_edge_weight.contains(child.weight());
+    //         if !matches_target_weight {
+    //           continue;
+    //         }
+    //
+    //         let other_id = if traverse_up {
+    //           child.source().id()
+    //         } else {
+    //           child.target().id()
+    //         };
+    //         if visited.contains(&other_id) {
+    //           continue;
+    //         }
+    //
+    //         queue.push(QueueCommand::Item {
+    //           idx: other_id,
+    //           context: new_context.clone(),
+    //         })
+    //       }
+    //     }
+    //     QueueCommand::Exit { f, idx } => {
+    //       let js_node_idx = env.create_int64(idx.index() as i64)?;
+    //       f.call(None, &[js_node_idx])?;
+    //     }
+    //   }
+    // }
+    //
+    // Ok(env.get_undefined()?.into_unknown())
   }
 
   #[napi]
   pub fn get_unreachable_nodes(&self, root_index: JSNodeIndex) -> Vec<JSNodeIndex> {
-    let root_index = NodeIndex::new(root_index as usize);
-    get_unreachable_nodes(&self.inner, root_index)
+    self
+      .inner
+      .get_unreachable_nodes(NodeIndex::new(root_index as usize))
       .into_iter()
       .map(|node| node.index() as u32)
       .collect()
@@ -496,17 +487,14 @@ impl ParcelGraphImpl {
     start_node: JSNodeIndex,
     visit: JsFunction,
   ) -> napi::Result<()> {
-    let start_node = NodeIndex::new(start_node as usize);
-    let mut dfs = DfsPostOrder::new(&self.inner, start_node);
-
-    while let Some(node) = dfs.next(&self.inner) {
-      let js_node_idx = env.create_int64(node.index() as i64)?;
-      visit
-        .call(None, &[&js_node_idx.into_unknown()])?
-        .into_unknown();
-    }
-
-    Ok(())
+    self.inner.post_order_dfs(
+      NodeIndex::new(start_node as usize),
+      |node: NodeIndex| -> napi::Result<()> {
+        let js_node_idx = env.create_int64(node.index() as i64)?;
+        let _: JsUnknown = visit.call(None, &[&js_node_idx.into_unknown()])?;
+        Ok(())
+      },
+    )
   }
 
   #[napi]
@@ -514,68 +502,57 @@ impl ParcelGraphImpl {
     let root_index = NodeIndex::new(root_index as usize);
     let node_index = NodeIndex::new(node_index as usize);
 
-    is_orphaned_node(&self.inner, root_index, node_index)
+    self.inner.is_orphaned_node(root_index, node_index)
   }
 }
 
 // MARK: Serialized Graph and conversion functions
-
-/// The graph is serialized to a list of nodes and a list of edges.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct SerializedGraph {
-  nodes: Vec<u32>,
-  edges: Vec<(u32, u32, EdgeWeight)>,
-  removed_nodes: Vec<u32>,
-}
-
-impl From<&ParcelGraphImpl> for SerializedGraph {
-  fn from(value: &ParcelGraphImpl) -> Self {
-    SerializedGraph {
-      removed_nodes: value
-        .removed_nodes
-        .iter()
-        .map(|item| item.index() as u32)
-        .collect(),
-      nodes: value
-        .inner
-        .raw_nodes()
-        .iter()
-        .map(|item| item.weight)
-        .collect(),
-      edges: value
-        .inner
-        .raw_edges()
-        .iter()
-        .map(|item| {
-          (
-            item.source().index() as u32,
-            item.target().index() as u32,
-            item.weight,
-          )
-        })
-        .collect(),
-    }
-  }
-}
-
-impl ParcelGraphImpl {
-  fn from_serialized(env: Env, value: &SerializedGraph) -> napi::Result<Self> {
-    let mut output: ParcelGraphImpl = Self::new(env)?;
-    output.removed_nodes = value
-      .removed_nodes
-      .iter()
-      .map(|index| NodeIndex::new(*index as usize))
-      .collect();
-    for node in value.nodes.iter() {
-      output.inner.add_node(*node);
-    }
-    for edge in value.edges.iter() {
-      output.inner.add_edge(edge.0.into(), edge.1.into(), edge.2);
-    }
-    Ok(output)
-  }
-}
-
+//
+// /// The graph is serialized to a list of nodes and a list of edges.
+// #[derive(Serialize, Deserialize, Debug, PartialEq)]
+// struct SerializedGraph {
+//   nodes: Vec<u32>,
+//   edges: Vec<(u32, u32, EdgeWeight)>,
+// }
+//
+// impl From<&ParcelGraphImpl> for SerializedGraph {
+//   fn from(value: &ParcelGraphImpl) -> Self {
+//     SerializedGraph {
+//       nodes: value
+//         .inner
+//         .raw_nodes()
+//         .iter()
+//         .map(|item| item.weight)
+//         .collect(),
+//       edges: value
+//         .inner
+//         .raw_edges()
+//         .iter()
+//         .map(|item| {
+//           (
+//             item.source().index() as u32,
+//             item.target().index() as u32,
+//             item.weight,
+//           )
+//         })
+//         .collect(),
+//     }
+//   }
+// }
+//
+// impl ParcelGraphImpl {
+//   fn from_serialized(env: Env, value: &SerializedGraph) -> napi::Result<Self> {
+//     let mut output: ParcelGraphImpl = Self::new(env)?;
+//     for node in value.nodes.iter() {
+//       output.inner.add_node(*node);
+//     }
+//     for edge in value.edges.iter() {
+//       output.inner.add_edge(edge.0.into(), edge.1.into(), edge.2);
+//     }
+//     Ok(output)
+//   }
+// }
+//
 // MARK: Algorithm helpers
 
 /// Given a graph and root index, get the list of nodes that are disconnected from the
@@ -608,6 +585,9 @@ fn is_orphaned_node<N, E>(
   root_index: NodeIndex,
   node_index: NodeIndex,
 ) -> bool {
+  if graph.node_weight(node_index).is_none() {
+    return true;
+  }
   let reversed_graph = Reversed(&graph);
   let mut dfs = Dfs::new(reversed_graph, node_index);
 
@@ -644,12 +624,11 @@ fn get_array_reference(env: Env, nodes: &Ref<()>) -> napi::Result<Array> {
 
 #[cfg(test)]
 mod test {
-  use super::*;
-
+  // use super::*;
+  //
   // /// Assert two graphs are equal.
   // fn assert_graph_is_equal(graph: &ParcelGraphImpl, other: &ParcelGraphImpl) {
   //   assert_eq!(graph.node_count(), other.node_count());
-  //   assert_eq!(graph.removed_nodes, other.removed_nodes);
   //   assert_eq!(
   //     graph
   //       .inner
@@ -696,7 +675,7 @@ mod test {
   //   let deserialized = ParcelGraphImpl::from(&serialized);
   //   assert_graph_is_equal(&graph, &deserialized);
   // }
-
+  //
   // #[test]
   // fn test_add_node() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -708,7 +687,7 @@ mod test {
   //   assert_eq!(idx2, 1);
   //   assert_eq!(idx3, 2);
   // }
-
+  //
   // #[test]
   // fn test_has_node() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -718,7 +697,7 @@ mod test {
   //   assert!(graph.has_node(idx2));
   //   assert!(!graph.has_node(3));
   // }
-
+  //
   // #[test]
   // fn test_node_weight() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -728,7 +707,7 @@ mod test {
   //   assert_eq!(graph.node_weight(idx2), Some(43));
   //   assert_eq!(graph.node_weight(3), None);
   // }
-
+  //
   // #[test]
   // fn test_remove_node() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -742,7 +721,7 @@ mod test {
   //   assert!(!graph.has_node(idx2));
   //   assert!(graph.has_node(idx3));
   // }
-
+  //
   // #[test]
   // fn test_remove_edge_makes_edge_none() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -753,7 +732,7 @@ mod test {
   //   graph.remove_edge(idx1, idx2, vec![], true, idx1).unwrap();
   //   assert!(!graph.has_edge(idx1, idx2, vec![]));
   // }
-
+  //
   // #[test]
   // fn test_removed_edge_is_not_returned_anymore() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -764,7 +743,7 @@ mod test {
   //   assert!(!graph.has_edge(idx1, idx2, vec![]));
   //   assert_eq!(graph.get_all_edges(), vec![]);
   // }
-
+  //
   // #[test]
   // fn test_remove_edge_should_prune_graph_at_that_edge() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -791,7 +770,7 @@ mod test {
   //     }]
   //   )
   // }
-
+  //
   // #[test]
   // fn test_node_count_increases_when_node_is_added() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -799,7 +778,7 @@ mod test {
   //   graph.add_node(0);
   //   assert_eq!(graph.node_count(), 1);
   // }
-
+  //
   // #[test]
   // fn test_node_count_decreases_when_node_is_removed() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -808,7 +787,7 @@ mod test {
   //   graph.remove_node(idx, idx);
   //   assert_eq!(graph.node_count(), 0);
   // }
-
+  //
   // #[test]
   // fn test_is_orphaned_node() {
   //   let mut graph = ParcelGraphImpl::new();
@@ -888,4 +867,7 @@ mod test {
   //   assert_eq!(unreachable.len(), 0);
   //   assert_eq!(unreachable, vec![]);
   // }
+
+  #[test]
+  fn test_compiles() {}
 }

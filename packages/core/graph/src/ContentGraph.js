@@ -84,14 +84,26 @@ export default class ContentGraph<TNode, TEdgeType: number = 1> extends Graph<
   }
 
   hasContentKey(contentKey: ContentKey): boolean {
-    return this._contentKeyToNodeId.has(contentKey);
+    return (
+      this._contentKeyToNodeId.has(contentKey) &&
+      this.hasNode(this._contentKeyToNodeId.get(contentKey))
+    );
   }
 
   removeNode(nodeId: NodeId): void {
     this._assertHasNodeId(nodeId);
+    // const lastNodeId = this.nodes.length - 1;
+
     let contentKey = nullthrows(this._nodeIdToContentKey.get(nodeId));
     this._contentKeyToNodeId.delete(contentKey);
     this._nodeIdToContentKey.delete(nodeId);
+
+    // // Relocate the last node to this position
+    // const lastNodeContentKey = this._nodeIdToContentKey.get(lastNodeId);
+    // this._contentKeyToNodeId.set(lastNodeContentKey, nodeId);
+    // this._nodeIdToContentKey.delete(lastNodeId);
+    // this._nodeIdToContentKey.set(nodeId, lastNodeContentKey);
+
     super.removeNode(nodeId);
   }
 }
