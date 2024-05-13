@@ -37,6 +37,13 @@ pub struct ProjectPath {
   path: PathBuf,
 }
 
+impl ProjectPath {
+  pub fn new(project_root: &Path, path: &Path) -> Result<Self, std::path::StripPrefixError> {
+    let path = path.strip_prefix(project_root)?.to_path_buf();
+    Ok(Self { path })
+  }
+}
+
 impl From<&str> for ProjectPath {
   fn from(path: &str) -> Self {
     Self {

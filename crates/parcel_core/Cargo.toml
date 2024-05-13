@@ -13,6 +13,16 @@ parcel_filesystem = { path = "../parcel_filesystem" }
 parcel_napi_helpers = { path = "../parcel_napi_helpers" }
 parcel-resolver = { path = "../../packages/utils/node-resolver-rs" }
 
+# asset graph
+swc_ecma_parser = "0.144.1"
+swc_ecma_visit = "0.99.1"
+swc_ecma_ast = "0.113.1"
+swc_common = "0.33.26"
+rayon = "1.10.0"
+tokio = { version = "1.37.0", features = ["full"] }
+petgraph = "0.6.4"
+
+# general
 anyhow = "1.0.82"
 glob = "0.3.1"
 mockall = "0.12.1"

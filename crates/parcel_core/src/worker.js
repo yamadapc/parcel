@@ -1,0 +1,5 @@
+// worker.js
+
+registerWorker(event => {
+  // ...
+});
