@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "JavaScript Transformer Plugin for the Parcel Bundler"
 
+[[bench]]
+name = "parcel_plugin_transformer_js_benchmarks"
+harness = false
+
 [dependencies]
 parcel_core = { path = "../parcel_core" }
 anyhow = "1"
@@ -13,3 +17,4 @@ indexmap = "2.2.6"
 
 [dev-dependencies]
 parcel_filesystem = { path = "../parcel_filesystem" }
+criterion = "0.5.1"

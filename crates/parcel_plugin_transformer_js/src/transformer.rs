@@ -5,8 +5,9 @@ use parcel_core::plugin::{RunTransformContext, TransformResult, TransformationIn
 use parcel_core::types::{Asset, ParcelOptions};
 
 mod conversion;
-#[cfg(test)]
-mod test_helpers;
+
+#[doc(hidden)]
+pub mod test_helpers;
 
 /// This is a rust only `TransformerPlugin` implementation for JS assets that goes through the
 /// default SWC transformer.
