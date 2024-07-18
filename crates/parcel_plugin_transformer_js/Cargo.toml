@@ -12,7 +12,7 @@ harness = false
 parcel_core = { path = "../parcel_core" }
 anyhow = "1"
 parcel-js-swc-core = { path = "../../packages/transformers/js/core" }
-swc_core = { version = "0.96", features = ["ecma_ast"] }
+swc_core = { version = "0.92", features = ["ecma_ast"] }
 indexmap = "2.2.6"
 
 [dev-dependencies]
