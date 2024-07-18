@@ -4,11 +4,11 @@ use std::fmt;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::Path;
-use swc_core::ecma::utils::stack_size::maybe_grow_default;
 
 use path_slash::PathBufExt;
 use serde::Deserialize;
 use serde::Serialize;
+use swc_core::common::sync::Lrc;
 use swc_core::common::Mark;
 use swc_core::common::SourceMap;
 use swc_core::common::Span;
@@ -18,12 +18,14 @@ use swc_core::ecma::ast::MemberProp;
 use swc_core::ecma::ast::{self};
 use swc_core::ecma::atoms::js_word;
 use swc_core::ecma::atoms::JsWord;
+use swc_core::ecma::utils::stack_size::maybe_grow_default;
 use swc_core::ecma::visit::Fold;
 use swc_core::ecma::visit::FoldWith;
 
 use crate::fold_member_expr_skip_prop;
 use crate::utils::*;
 use crate::Config;
+
 macro_rules! hash {
   ($str:expr) => {{
     let mut hasher = DefaultHasher::new();
@@ -121,7 +123,7 @@ pub struct DependencyDescriptor {
 
 /// This pass collects dependencies in a module and compiles references as needed to work with Parcel's JSRuntime.
 pub fn dependency_collector<'a>(
-  source_map: &'a SourceMap,
+  source_map: Lrc<SourceMap>,
   items: &'a mut Vec<DependencyDescriptor>,
   ignore_mark: swc_core::common::Mark,
   unresolved_mark: swc_core::common::Mark,
@@ -143,7 +145,7 @@ pub fn dependency_collector<'a>(
 }
 
 struct DependencyCollector<'a> {
-  source_map: &'a SourceMap,
+  source_map: Lrc<SourceMap>,
   items: &'a mut Vec<DependencyDescriptor>,
   in_try: bool,
   in_promise: bool,
@@ -200,7 +202,7 @@ impl<'a> DependencyCollector<'a> {
 
     self.items.push(DependencyDescriptor {
       kind,
-      loc: SourceLocation::from(self.source_map, span),
+      loc: SourceLocation::from(&self.source_map, span),
       specifier,
       attributes,
       is_optional,
@@ -237,17 +239,12 @@ impl<'a> DependencyCollector<'a> {
     let placeholder = if self.config.standalone {
       specifier.as_ref().into()
     } else {
-      format!(
-        "{:x}",
-        hash!(format!(
-          "parcel_url:{}:{}:{}",
-          self.config.filename, specifier, kind
-        ))
-      )
+      let module_id = format!("parcel_url:{}:{}:{}", self.config.filename, specifier, kind);
+      format!("{:x}", hash!(module_id))
     };
     self.items.push(DependencyDescriptor {
       kind,
-      loc: SourceLocation::from(self.source_map, span),
+      loc: SourceLocation::from(&self.source_map, span),
       specifier,
       attributes: None,
       is_optional: false,
@@ -286,7 +283,7 @@ impl<'a> DependencyCollector<'a> {
       message: "SCRIPT_ERROR".to_string(),
       code_highlights: Some(vec![CodeHighlight {
         message: None,
-        loc: SourceLocation::from(self.source_map, span),
+        loc: SourceLocation::from(&self.source_map, span),
       }]),
       hints: None,
       show_environment: true,
@@ -480,7 +477,7 @@ impl<'a> Fold for DependencyCollector<'a> {
                     message: msg.to_string(),
                     code_highlights: Some(vec![CodeHighlight {
                       message: None,
-                      loc: SourceLocation::from(self.source_map, span),
+                      loc: SourceLocation::from(&self.source_map, span),
                     }]),
                     hints: Some(vec![String::from(
                       "Use a static `import`, or dynamic `import()` instead.",
@@ -674,7 +671,7 @@ impl<'a> Fold for DependencyCollector<'a> {
             message: msg.to_string(),
             code_highlights: Some(vec![CodeHighlight {
               message: None,
-              loc: SourceLocation::from(self.source_map, str_.span),
+              loc: SourceLocation::from(&self.source_map, str_.span),
             }]),
             hints: Some(vec![format!(
               "Replace with: new URL('{}', import.meta.url)",
@@ -836,7 +833,7 @@ impl<'a> Fold for DependencyCollector<'a> {
             ),
             code_highlights: Some(vec![CodeHighlight {
               message: None,
-              loc: SourceLocation::from(self.source_map, str_.span),
+              loc: SourceLocation::from(&self.source_map, str_.span),
             }]),
             hints: Some(vec![format!(
               "Replace with: new URL('{}', import.meta.url)",
@@ -1299,7 +1296,7 @@ impl<'a> DependencyCollector<'a> {
             message: "`import.meta` is not supported outside a module.".to_string(),
             code_highlights: Some(vec![CodeHighlight {
               message: None,
-              loc: SourceLocation::from(self.source_map, *span),
+              loc: SourceLocation::from(&self.source_map, *span),
             }]),
             hints: None,
             show_environment: true,
@@ -1464,4 +1461,403 @@ fn match_worker_type(expr: Option<&ast::ExprOrSpread>) -> (SourceType, Option<as
   }
 
   (SourceType::Script, expr.cloned())
+}
+
+#[cfg(test)]
+mod test {
+  use swc_core::atoms::Atom;
+
+  use crate::test_utils::{run_fold, RunTestContext};
+
+  use super::*;
+
+  fn make_dependency_collector<'a>(
+    diagnostics: &'a mut Vec<Diagnostic>,
+    dependencies: &'a mut Vec<DependencyDescriptor>,
+    config: &'a Config,
+    context: RunTestContext,
+  ) -> DependencyCollector<'a> {
+    let ignore_mark = Mark::fresh(Mark::root());
+    DependencyCollector {
+      source_map: context.source_map.clone(),
+      items: dependencies,
+      diagnostics,
+      require_node: None,
+      ignore_mark,
+      unresolved_mark: context.unresolved_mark,
+      config: &config,
+      import_meta: None,
+      in_try: false,
+      in_promise: false,
+    }
+  }
+
+  #[test]
+  fn test_empty_module() {
+    let code = r#""#;
+    let mut diagnostics = vec![];
+    let mut dependencies = vec![];
+    let config = Default::default();
+
+    let output_code = run_fold(code, |context| {
+      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+    })
+    .output_code;
+
+    let expected_code = r#""#.trim_start();
+    assert_eq!(output_code, expected_code);
+    assert_eq!(dependencies, vec![]);
+    assert_eq!(diagnostics, vec![]);
+  }
+
+  #[test]
+  fn test_module_with_esm_import_statements() {
+    let code = r#"
+import { x, y } from 'dependency-a';
+import z from 'dependency-b';
+    "#;
+    let mut diagnostics = vec![];
+    let mut dependencies = vec![];
+    let config = Default::default();
+
+    let output_code = run_fold(code, |context| {
+      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+    })
+    .output_code;
+
+    let expected_code = r#"
+import { x, y } from 'dependency-a';
+import z from 'dependency-b';
+    "#
+    .trim_start()
+    .trim_end_matches(|c| c == ' ');
+    assert_eq!(output_code, expected_code);
+    assert_eq!(
+      dependencies,
+      vec![
+        DependencyDescriptor {
+          kind: DependencyKind::Import,
+          specifier: Atom::from("dependency-a"),
+          source_type: Some(SourceType::Module),
+          ..dependencies[0].clone()
+        },
+        DependencyDescriptor {
+          kind: DependencyKind::Import,
+          specifier: Atom::from("dependency-b"),
+          source_type: Some(SourceType::Module),
+          ..dependencies[1].clone()
+        }
+      ]
+    );
+    assert_eq!(diagnostics, vec![]);
+  }
+
+  #[test]
+  fn test_module_with_esm_re_export_statements() {
+    let code = r#"
+export { x, y } from 'dependency-a';
+export * from 'dependency-b';
+    "#;
+    let mut diagnostics = vec![];
+    let mut dependencies = vec![];
+    let config = Default::default();
+
+    let output_code = run_fold(code, |context| {
+      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+    })
+    .output_code;
+
+    let expected_code = r#"
+export { x, y } from 'dependency-a';
+export * from 'dependency-b';
+    "#
+    .trim_start()
+    .trim_end_matches(|c| c == ' ');
+    assert_eq!(output_code, expected_code);
+    assert_eq!(
+      dependencies,
+      vec![
+        DependencyDescriptor {
+          kind: DependencyKind::Export,
+          specifier: Atom::from("dependency-a"),
+          source_type: Some(SourceType::Module),
+          ..dependencies[0].clone()
+        },
+        DependencyDescriptor {
+          kind: DependencyKind::Export,
+          specifier: Atom::from("dependency-b"),
+          source_type: Some(SourceType::Module),
+          ..dependencies[1].clone()
+        }
+      ]
+    );
+    assert_eq!(diagnostics, vec![]);
+  }
+
+  #[test]
+  fn test_module_with_esm_dynamic_import() {
+    let code = r#"
+import('dependency-a').then(({ x, y }) => {
+  console.log({ x, y });
+});
+    "#;
+    let mut diagnostics = vec![];
+    let mut dependencies = vec![];
+    let config = Default::default();
+
+    let output_code = run_fold(code, |context| {
+      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+    })
+    .output_code;
+
+    let module_hash = hash!(format!(
+      "{}:{}:{}",
+      String::from(""), // <- empty file-name
+      "dependency-a",
+      DependencyKind::DynamicImport
+    ));
+    let expected_code = format!(
+      r#"
+require("{module_hash:x}").then(({{ x, y }})=>{{
+    console.log({{
+        x,
+        y
+    }});
+}});
+    "#
+    );
+    let expected_code = expected_code.trim_start().trim_end_matches(|c| c == ' ');
+
+    assert_eq!(output_code, expected_code);
+    assert_eq!(
+      dependencies,
+      vec![DependencyDescriptor {
+        kind: DependencyKind::DynamicImport,
+        specifier: Atom::from("dependency-a"),
+        source_type: Some(SourceType::Module),
+        ..dependencies[0].clone()
+      }]
+    );
+    assert_eq!(diagnostics, vec![]);
+  }
+
+  #[test]
+  fn test_module_with_cjs_require() {
+    let code = r#"
+const { x, y } = require('dependency-a');
+    "#;
+    let mut diagnostics = vec![];
+    let mut dependencies = vec![];
+    let config = Default::default();
+
+    let output_code = run_fold(code, |context| {
+      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+    })
+    .output_code;
+
+    let module_hash = hash!(format!(
+      "{}:{}:{}",
+      String::from(""), // <- empty file-name
+      "dependency-a",
+      DependencyKind::Require
+    ));
+    let expected_code = format!(
+      r#"
+const {{ x, y }} = require("{module_hash:x}");
+    "#
+    );
+    let expected_code = expected_code.trim_start().trim_end_matches(|c| c == ' ');
+
+    assert_eq!(output_code, expected_code);
+    assert_eq!(
+      dependencies,
+      vec![DependencyDescriptor {
+        kind: DependencyKind::Require,
+        specifier: Atom::from("dependency-a"),
+        source_type: Some(SourceType::Module),
+        ..dependencies[0].clone()
+      }]
+    );
+    assert_eq!(diagnostics, vec![]);
+  }
+
+  #[test]
+  fn test_module_with_web_worker() {
+    let code = r#"
+const worker = new Worker(
+    new URL('dependency-a', import.meta.url),
+    {type: 'module'}
+);
+    "#;
+    let mut diagnostics = vec![];
+    let mut dependencies = vec![];
+    let mut config: Config = Default::default();
+    config.supports_module_workers = true;
+    config.is_browser = true;
+
+    let output_code = run_fold(code, |context| {
+      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+    })
+    .output_code;
+
+    let module_hash = hash!(format!(
+      "{}:{}:{}",
+      String::from(""), // <- empty file-name
+      "dependency-a",
+      DependencyKind::WebWorker
+    ));
+    let expected_code = format!(
+      r#"
+const worker = new Worker(require("{module_hash:x}"), {{
+    type: 'module'
+}});
+    "#
+    );
+    let expected_code = expected_code.trim_start().trim_end_matches(|c| c == ' ');
+
+    assert_eq!(
+      dependencies,
+      vec![DependencyDescriptor {
+        kind: DependencyKind::WebWorker,
+        specifier: Atom::from("dependency-a"),
+        source_type: Some(SourceType::Module),
+        ..dependencies[0].clone()
+      }]
+    );
+    assert_eq!(output_code, expected_code);
+    assert_eq!(diagnostics, vec![]);
+  }
+
+  #[test]
+  fn test_module_with_service_worker() {
+    let code = r#"
+navigator.serviceWorker.register(
+    new URL('dependency-a', import.meta.url),
+    {type: 'module'}
+);
+    "#;
+    let mut diagnostics = vec![];
+    let mut dependencies = vec![];
+    let mut config: Config = Default::default();
+    config.supports_module_workers = true;
+    config.is_browser = true;
+
+    let output_code = run_fold(code, |context| {
+      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+    })
+    .output_code;
+
+    let module_hash = hash!(format!(
+      "{}:{}:{}",
+      String::from(""), // <- empty file-name
+      "dependency-a",
+      DependencyKind::ServiceWorker
+    ));
+    let expected_code = format!(
+      r#"
+navigator.serviceWorker.register(require("{module_hash:x}"));
+    "#
+    );
+    let expected_code = expected_code.trim_start().trim_end_matches(|c| c == ' ');
+
+    assert_eq!(
+      dependencies,
+      vec![DependencyDescriptor {
+        kind: DependencyKind::ServiceWorker,
+        specifier: Atom::from("dependency-a"),
+        source_type: Some(SourceType::Module),
+        ..dependencies[0].clone()
+      }]
+    );
+    assert_eq!(output_code, expected_code);
+    assert_eq!(diagnostics, vec![]);
+  }
+
+  #[test]
+  fn test_module_with_worklet() {
+    let code = r#"
+CSS.paintWorklet.addModule(new URL('dependency-a', import.meta.url));
+    "#;
+    let mut diagnostics = vec![];
+    let mut dependencies = vec![];
+    let mut config: Config = Default::default();
+    config.supports_module_workers = true;
+    config.is_browser = true;
+
+    let output_code = run_fold(code, |context| {
+      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+    })
+    .output_code;
+
+    let module_hash = hash!(format!(
+      "{}:{}:{}",
+      String::from(""), // <- empty file-name
+      "dependency-a",
+      DependencyKind::Worklet
+    ));
+    let expected_code = format!(
+      r#"
+CSS.paintWorklet.addModule(require("{module_hash:x}"));
+    "#
+    );
+    let expected_code = expected_code.trim_start().trim_end_matches(|c| c == ' ');
+
+    assert_eq!(
+      dependencies,
+      vec![DependencyDescriptor {
+        kind: DependencyKind::Worklet,
+        specifier: Atom::from("dependency-a"),
+        source_type: Some(SourceType::Module),
+        ..dependencies[0].clone()
+      }]
+    );
+    assert_eq!(output_code, expected_code);
+    assert_eq!(diagnostics, vec![]);
+  }
+
+  #[test]
+  fn test_module_with_url() {
+    let code = r#"
+const img = document.createElement('img');
+img.src = new URL('hero.jpg', import.meta.url);
+document.body.appendChild(img);
+    "#;
+    let mut diagnostics = vec![];
+    let mut dependencies = vec![];
+    let mut config: Config = Default::default();
+    config.supports_module_workers = true;
+    config.is_browser = true;
+
+    let output_code = run_fold(code, |context| {
+      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+    })
+    .output_code;
+
+    let module_hash = hash!(format!(
+      "{}:{}:{}",
+      String::from(""), // <- empty file-name
+      "hero.jpg",
+      DependencyKind::Url
+    ));
+    let expected_code = format!(
+      r#"
+const img = document.createElement('img');
+img.src = new URL(require("{module_hash:x}"));
+document.body.appendChild(img);
+    "#
+    );
+    let expected_code = expected_code.trim_start().trim_end_matches(|c| c == ' ');
+
+    assert_eq!(
+      dependencies,
+      vec![DependencyDescriptor {
+        kind: DependencyKind::Url,
+        specifier: Atom::from("hero.jpg"),
+        source_type: Some(SourceType::Module),
+        ..dependencies[0].clone()
+      }]
+    );
+    assert_eq!(output_code, expected_code);
+    assert_eq!(diagnostics, vec![]);
+  }
 }
