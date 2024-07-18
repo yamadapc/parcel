@@ -1471,7 +1471,7 @@ mod test {
 
   use super::*;
 
-  fn make_dependency_collector<'a>(
+  fn make_test_dependency_collector<'a>(
     diagnostics: &'a mut Vec<Diagnostic>,
     dependencies: &'a mut Vec<DependencyDescriptor>,
     config: &'a Config,
@@ -1500,7 +1500,7 @@ mod test {
     let config = Default::default();
 
     let output_code = run_fold(code, |context| {
-      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+      make_test_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
     })
     .output_code;
 
@@ -1521,7 +1521,7 @@ import z from 'dependency-b';
     let config = Default::default();
 
     let output_code = run_fold(code, |context| {
-      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+      make_test_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
     })
     .output_code;
 
@@ -1563,7 +1563,7 @@ export * from 'dependency-b';
     let config = Default::default();
 
     let output_code = run_fold(code, |context| {
-      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+      make_test_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
     })
     .output_code;
 
@@ -1606,7 +1606,7 @@ import('dependency-a').then(({ x, y }) => {
     let config = Default::default();
 
     let output_code = run_fold(code, |context| {
-      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+      make_test_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
     })
     .output_code;
 
@@ -1651,7 +1651,7 @@ const { x, y } = require('dependency-a');
     let config = Default::default();
 
     let output_code = run_fold(code, |context| {
-      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+      make_test_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
     })
     .output_code;
 
@@ -1696,7 +1696,7 @@ const worker = new Worker(
     config.is_browser = true;
 
     let output_code = run_fold(code, |context| {
-      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+      make_test_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
     })
     .output_code;
 
@@ -1743,7 +1743,7 @@ navigator.serviceWorker.register(
     config.is_browser = true;
 
     let output_code = run_fold(code, |context| {
-      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+      make_test_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
     })
     .output_code;
 
@@ -1785,7 +1785,7 @@ CSS.paintWorklet.addModule(new URL('dependency-a', import.meta.url));
     config.is_browser = true;
 
     let output_code = run_fold(code, |context| {
-      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+      make_test_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
     })
     .output_code;
 
@@ -1829,7 +1829,7 @@ document.body.appendChild(img);
     config.is_browser = true;
 
     let output_code = run_fold(code, |context| {
-      make_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
+      make_test_dependency_collector(&mut diagnostics, &mut dependencies, &config, context)
     })
     .output_code;
 
